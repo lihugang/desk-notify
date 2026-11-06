@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/fatedier/frp/pkg/config"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
-	"github.com/fatedier/frp/pkg/client"
+	"github.com/fatedier/frp/client"
 	"github.com/lihugang/desk-notify/core/pkg/tunnel"
 )
 
