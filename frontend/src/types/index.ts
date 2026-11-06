@@ -15,6 +15,8 @@ export interface NotificationMessage {
   duration: number; // In seconds, 0 = manual close
   sender?: string;
   createdAt: string;
+  soundEnabled?: boolean;
+  soundUrl?: string;
 }
 
 export interface AppConfig {
@@ -24,6 +26,7 @@ export interface AppConfig {
   lanAuthRequired: boolean;
   defaultDuration: number;
   soundEnabled: boolean;
+  customSound?: string;
   autoStart: boolean;
   frp: {
     enabled: boolean;

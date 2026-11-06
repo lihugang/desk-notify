@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/client"
+	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/lihugang/desk-notify/core/pkg/tunnel"
 )
 
@@ -52,12 +52,17 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 		clientCfg.ServerAddr = cfg.ServerAddr
 		clientCfg.ServerPort = cfg.ServerPort
 		clientCfg.Auth.Token = cfg.Token
+		loginFailExit := false
+		clientCfg.LoginFailExit = &loginFailExit
+		clientCfg.Complete()
 
 		proxyCfg := &v1.TCPProxyConfig{}
 		proxyCfg.Name = fmt.Sprintf("desk-notify-%d", cfg.RemotePort)
+		proxyCfg.Type = "tcp"
 		proxyCfg.LocalIP = "127.0.0.1"
 		proxyCfg.LocalPort = cfg.LocalPort
 		proxyCfg.RemotePort = cfg.RemotePort
+		proxyCfg.Complete("")
 
 		svr, err := client.NewService(client.ServiceOptions{
 			Common: &clientCfg,
@@ -69,17 +74,26 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 			f.mu.Lock()
 			f.status = "error"
 			f.mu.Unlock()
+			fmt.Printf("[DeskNotify FRP] 初始化失败: %v\n", err)
 			return
 		}
 
 		f.mu.Lock()
 		f.status = "connected"
 		f.mu.Unlock()
+		fmt.Printf("[DeskNotify FRP] 穿透服务启动中: 远程端口 %d -> 本地端口 %d (服务器: %s:%d)\n",
+			cfg.RemotePort, cfg.LocalPort, cfg.ServerAddr, cfg.ServerPort)
 
 		if err := svr.Run(ctx); err != nil {
 			f.mu.Lock()
 			f.status = "disconnected"
 			f.mu.Unlock()
+			fmt.Printf("[DeskNotify FRP] 穿透服务已停止: %v\n", err)
+		} else {
+			f.mu.Lock()
+			f.status = "disconnected"
+			f.mu.Unlock()
+			fmt.Println("[DeskNotify FRP] 穿透服务已退出")
 		}
 	}()
 

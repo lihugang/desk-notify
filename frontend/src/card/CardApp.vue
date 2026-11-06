@@ -9,15 +9,19 @@
       :class="getCardBorderClass(currentMessage.level)"
     >
       <!-- Top Bar: Level, Time, Countdown & Close -->
-      <div class="px-6 py-4 flex items-center justify-between border-b border-slate-100" :class="getHeaderBgClass(currentMessage.level)">
-        <div class="flex items-center space-x-3">
+      <div
+        class="px-6 py-4 flex items-center justify-between border-b border-slate-100 select-none cursor-move"
+        :class="getHeaderBgClass(currentMessage.level)"
+        style="--wails-draggable: drag;"
+      >
+        <div class="flex items-center space-x-3 pointer-events-none">
           <span class="px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-xs" :class="getBadgeClass(currentMessage.level)">
             {{ getLevelLabel(currentMessage.level) }}
           </span>
           <span class="text-xs text-slate-500 font-medium">{{ classroomName }} · 桌面通知</span>
         </div>
 
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-3" style="--wails-draggable: no-drag;">
           <!-- Countdown Timer -->
           <div v-if="remainingSeconds > 0" class="flex items-center space-x-1.5 text-xs text-slate-500 bg-white/80 px-2.5 py-1 rounded-full border border-slate-200/60">
             <Clock class="w-3.5 h-3.5 text-slate-400" />
@@ -27,7 +31,7 @@
           <!-- Manual Close Button -->
           <button
             @click="closeCard"
-            class="p-1.5 rounded-full hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 transition"
+            class="p-1.5 rounded-full hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 transition cursor-pointer"
             title="关闭通知"
           >
             <X class="w-5 h-5" />
@@ -123,7 +127,9 @@ function connectWebSocket() {
 
 function showMessage(msg: NotificationMessage) {
   currentMessage.value = msg;
-  playAlertSound();
+  if (msg.soundEnabled !== false) {
+    playAlertSound(msg.soundUrl);
+  }
 
   if (timer) clearInterval(timer);
   if (msg.duration > 0) {
@@ -146,12 +152,16 @@ function closeCard() {
   if ((window as any).runtime?.WindowHide) {
     (window as any).runtime.WindowHide();
   }
+  fetch('/api/window/hide', { method: 'POST' }).catch(() => {});
 }
 
-function playAlertSound() {
+function playAlertSound(soundUrl?: string) {
   try {
-    const audio = new Audio('/alert.mp3');
-    audio.play().catch(() => {});
+    const url = soundUrl || `/api/sound/current?t=${Date.now()}`;
+    const audio = new Audio(url);
+    audio.play().catch((err) => {
+      console.warn('播放提示音失败:', err);
+    });
   } catch (e) {}
 }
 
