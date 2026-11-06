@@ -1,0 +1,1 @@
+{"root":["./src/main.ts","./src/vite-env.d.ts","./src/card/main.ts","./src/settings/main.ts","./src/types/index.ts","./src/card/CardApp.vue","./src/settings/SettingsApp.vue","./src/teacher/TeacherApp.vue"],"version":"5.6.3"}

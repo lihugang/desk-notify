@@ -1,0 +1,63 @@
+name: Build & Release Windows Executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install Frontend Dependencies & Build
+        run: |
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Enable FRP Module & Download Dependencies
+        run: |
+          go work use ./modules/tunnel-frp
+          cd modules/tunnel-frp
+          go mod tidy
+          cd ../..
+
+      - name: Build Windows Executable
+        run: |
+          mkdir -p build
+          # -H=windowsgui ensures the app runs silently without a console window
+          go build -ldflags "-H=windowsgui -s -w" -o build/DeskNotify.exe ./core
+
+      - name: Create GitHub Release & Upload Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: build/DeskNotify.exe
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
