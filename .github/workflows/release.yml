@@ -50,13 +50,51 @@ jobs:
         run: |
           mkdir -p build
           # -H=windowsgui ensures the app runs silently without a console window
-          go build -ldflags "-H=windowsgui -s -w" -o build/DeskNotify.exe ./core
+          go build -tags frp -ldflags "-H=windowsgui -s -w" -o build/DeskNotify.exe ./core
+
+      - name: Sign Windows Executable (Authenticode)
+        if: env.WINDOWS_CERT_BASE64 != ''
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $pfxPath = "$env:RUNNER_TEMP\codesign.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+
+          # Find signtool.exe in Windows SDK
+          $signtool = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -First 1).FullName
+          if (-not $signtool) {
+            Write-Error "signtool.exe not found in Windows Kits!"
+            exit 1
+          }
+          Write-Host "Found SignTool at: $signtool"
+
+          # Sign binary with SHA256, RFC3161 timestamp, software name and project URL
+          & $signtool sign /f $pfxPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "传纸条 (DeskNotify)" /du "https://github.com/lihugang/DeskNotify" build/DeskNotify.exe
+
+          # Verify signature
+          & $signtool verify /pa /v build/DeskNotify.exe
+
+          # Securely cleanup temporary PFX file
+          Remove-Item $pfxPath -Force
+
+      - name: Package Release Assets
+        shell: pwsh
+        run: |
+          Copy-Item certs/DeskNotify-CA.cer build/
+          Copy-Item certs/install_ca.cmd "build/一键安装根证书(右键管理员运行).cmd"
+          Compress-Archive -Path build/* -DestinationPath build/DeskNotify-Windows-x64.zip -Force
 
       - name: Create GitHub Release & Upload Asset
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: build/DeskNotify.exe
+          files: |
+            build/DeskNotify.exe
+            build/DeskNotify-Windows-x64.zip
+            build/DeskNotify-CA.cer
+            build/一键安装根证书(右键管理员运行).cmd
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false

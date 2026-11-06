@@ -18,8 +18,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/lihugang/desk-notify/core/pkg/auth"
+	"github.com/lihugang/desk-notify/core/pkg/cert"
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
+	"github.com/lihugang/desk-notify/core/pkg/desktop"
 	"github.com/lihugang/desk-notify/core/pkg/storage"
 	"github.com/lihugang/desk-notify/core/pkg/tunnel"
 )
@@ -35,8 +37,10 @@ type Server struct {
 	store      *db.Store
 	storage    *storage.Storage
 	tunnel     tunnel.Tunnel
+	desktop    desktop.Manager
 	staticFS   fs.FS
 	httpServer *http.Server
+	httpsServer *http.Server
 
 	mu      sync.RWMutex
 	clients map[*websocket.Conn]bool
@@ -47,6 +51,7 @@ func NewServer(
 	store *db.Store,
 	storage *storage.Storage,
 	tun tunnel.Tunnel,
+	desktop desktop.Manager,
 	staticFS fs.FS,
 ) *Server {
 	return &Server{
@@ -54,6 +59,7 @@ func NewServer(
 		store:    store,
 		storage:  storage,
 		tunnel:   tun,
+		desktop:  desktop,
 		staticFS: staticFS,
 		clients:  make(map[*websocket.Conn]bool),
 	}
@@ -79,7 +85,21 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/notify", s.handleNotify)
 	mux.HandleFunc("/api/history", s.handleHistory)
 	mux.HandleFunc("/api/files/", s.handleFiles)
+	mux.HandleFunc("/api/sound/current", s.handleCurrentSound)
+	mux.HandleFunc("/alert.mp3", s.handleCurrentSound)
+	mux.HandleFunc("/api/sound/upload", s.handleSoundUpload)
+	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
+	mux.HandleFunc("/api/window/show", s.handleWindowShow)
 	mux.HandleFunc("/ws", s.handleWS)
+
+	// Root CA Certificate download endpoints
+	handleCACert := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+		w.Header().Set("Content-Disposition", `attachment; filename="DeskNotify-CA.cer"`)
+		_, _ = w.Write(cert.GetRootCACertDER())
+	}
+	mux.HandleFunc("/DeskNotify-CA.cer", handleCACert)
+	mux.HandleFunc("/api/cert/ca.cer", handleCACert)
 
 	// Static frontend router
 	if s.staticFS != nil {
@@ -101,12 +121,35 @@ func (s *Server) Start() error {
 		Handler: mux,
 	}
 
-	fmt.Printf("[DeskNotify] Web server listening on %s\n", addr)
+	// 1. Initialize local TLS Server Certificate (signed by embedded DeskNotify Root CA)
+	dataDir := s.cfgMgr.GetDataDir()
+	certFile, keyFile, err := cert.EnsureServerCertificate(dataDir)
+	if err == nil {
+		httpsPort := cfg.Port + 1
+		httpsAddr := fmt.Sprintf("0.0.0.0:%d", httpsPort)
+		s.httpsServer = &http.Server{
+			Addr:    httpsAddr,
+			Handler: mux,
+		}
+		go func() {
+			fmt.Printf("[DeskNotify] HTTPS 服务已就绪: https://0.0.0.0:%d (CA 信任模式已启用)\n", httpsPort)
+			if err := s.httpsServer.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				fmt.Printf("[DeskNotify] HTTPS 服务异常: %v\n", err)
+			}
+		}()
+	} else {
+		fmt.Printf("[DeskNotify] 警告: 初始化 TLS 证书失败: %v\n", err)
+	}
+
+	fmt.Printf("[DeskNotify] HTTP Web server listening on %s\n", addr)
 	return s.httpServer.ListenAndServe()
 }
 
 func (s *Server) Stop() error {
 	_ = s.tunnel.Stop()
+	if s.httpsServer != nil {
+		_ = s.httpsServer.Close()
+	}
 	if s.httpServer != nil {
 		return s.httpServer.Close()
 	}
@@ -122,10 +165,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ips := getLocalIPs()
 	resp := map[string]interface{}{
-		"className":   cfg.ClassName,
-		"lanIPs":      ips,
-		"port":        cfg.Port,
-		"frpStatus":   s.tunnel.Status(),
+		"className":    cfg.ClassName,
+		"lanIPs":       ips,
+		"port":         cfg.Port,
+		"httpsPort":    cfg.Port + 1,
+		"frpStatus":    s.tunnel.Status(),
 		"frpPublicUrl": s.tunnel.PublicURL(),
 	}
 
@@ -328,8 +372,27 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	s.broadcastNotification(n)
 
+	// Trigger Desktop Runtime: System Notification and Pop-up Card Window
+	if s.desktop != nil {
+		s.desktop.Notify(n)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": notifyID})
+}
+
+func (s *Server) handleWindowHide(w http.ResponseWriter, r *http.Request) {
+	if s.desktop != nil {
+		s.desktop.HideCard()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleWindowShow(w http.ResponseWriter, r *http.Request) {
+	if s.desktop != nil {
+		s.desktop.ShowCard()
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -405,7 +468,20 @@ func (s *Server) broadcastNotification(n *db.Notification) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	data, err := json.Marshal(n)
+	cfg := s.cfgMgr.Get()
+
+	// Broadcast notification enriched with sound configuration
+	msg := struct {
+		*db.Notification
+		SoundEnabled bool   `json:"soundEnabled"`
+		SoundURL     string `json:"soundUrl"`
+	}{
+		Notification: n,
+		SoundEnabled: cfg.SoundEnabled,
+		SoundURL:     fmt.Sprintf("/api/sound/current?t=%d", time.Now().UnixMilli()),
+	}
+
+	data, err := json.Marshal(msg)
 	if err != nil {
 		return
 	}
@@ -413,6 +489,145 @@ func (s *Server) broadcastNotification(n *db.Notification) {
 	for client := range s.clients {
 		_ = client.WriteMessage(websocket.TextMessage, data)
 	}
+}
+
+func (s *Server) handleCurrentSound(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfgMgr.Get()
+
+	if !cfg.SoundEnabled {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	custom := strings.TrimSpace(cfg.CustomSound)
+	if custom != "" && custom != "default" {
+		// 1. External HTTP/HTTPS URL
+		if strings.HasPrefix(custom, "http://") || strings.HasPrefix(custom, "https://") {
+			http.Redirect(w, r, custom, http.StatusFound)
+			return
+		}
+
+		// 2. Uploaded sound in AppData/sounds
+		uploadedPath := filepath.Join(s.cfgMgr.GetDataDir(), "sounds", filepath.Base(custom))
+		if fi, err := os.Stat(uploadedPath); err == nil && !fi.IsDir() {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+			http.ServeFile(w, r, uploadedPath)
+			return
+		}
+
+		// 3. Local filesystem path
+		if fi, err := os.Stat(custom); err == nil && !fi.IsDir() {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+			http.ServeFile(w, r, custom)
+			return
+		}
+
+		// 4. Built-in preset sound in staticFS (e.g. "sounds/chime.mp3" or "chime.mp3")
+		if s.staticFS != nil {
+			presetPath := custom
+			if !strings.HasPrefix(presetPath, "sounds/") {
+				presetPath = "sounds/" + presetPath
+			}
+			if f, err := s.staticFS.Open(presetPath); err == nil {
+				defer f.Close()
+				contentType := mime.TypeByExtension(filepath.Ext(presetPath))
+				if contentType == "" {
+					contentType = "audio/mpeg"
+				}
+				w.Header().Set("Content-Type", contentType)
+				w.Header().Set("Cache-Control", "public, max-age=86400")
+				_, _ = io.Copy(w, f)
+				return
+			}
+		}
+	}
+
+	// Default fallback: embedded alert.mp3
+	if s.staticFS != nil {
+		f, err := s.staticFS.Open("alert.mp3")
+		if err == nil {
+			defer f.Close()
+			w.Header().Set("Content-Type", "audio/mpeg")
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			_, _ = io.Copy(w, f)
+			return
+		}
+	}
+
+	http.NotFound(w, r)
+}
+
+func (s *Server) handleSoundUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cfg := s.cfgMgr.Get()
+	if !auth.CheckAuth(r, cfg) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Max 10MB audio file
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Audio file too large", http.StatusBadRequest)
+		return
+	}
+
+	file, fh, err := r.FormFile("audio")
+	if err != nil {
+		// Also check "file" field name
+		var err2 error
+		file, fh, err2 = r.FormFile("file")
+		if err2 != nil {
+			http.Error(w, "Missing audio file in form", http.StatusBadRequest)
+			return
+		}
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(fh.Filename))
+	if ext != ".mp3" && ext != ".wav" && ext != ".ogg" && ext != ".m4a" && ext != ".aac" && ext != ".flac" {
+		http.Error(w, "Unsupported audio format. Please use .mp3, .wav, or .ogg", http.StatusBadRequest)
+		return
+	}
+
+	soundsDir := filepath.Join(s.cfgMgr.GetDataDir(), "sounds")
+	if err := os.MkdirAll(soundsDir, 0755); err != nil {
+		http.Error(w, "Failed to create sounds directory", http.StatusInternalServerError)
+		return
+	}
+
+	cleanFileName := fmt.Sprintf("custom_sound_%d%s", time.Now().Unix(), ext)
+	targetPath := filepath.Join(soundsDir, cleanFileName)
+
+	out, err := os.Create(targetPath)
+	if err != nil {
+		http.Error(w, "Failed to create target file", http.StatusInternalServerError)
+		return
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, file); err != nil {
+		http.Error(w, "Failed to save audio content", http.StatusInternalServerError)
+		return
+	}
+
+	// Update configuration
+	cfg.CustomSound = cleanFileName
+	if err := s.cfgMgr.Save(cfg); err != nil {
+		http.Error(w, "Failed to persist configuration", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":           true,
+		"customSound":  cleanFileName,
+		"originalName": fh.Filename,
+		"url":          "/api/sound/current",
+	})
 }
 
 func getLocalIPs() []string {

@@ -24,6 +24,7 @@ type AppConfig struct {
 	LanAuthRequired bool      `json:"lanAuthRequired"`
 	DefaultDuration int       `json:"defaultDuration"`
 	SoundEnabled    bool      `json:"soundEnabled"`
+	CustomSound     string    `json:"customSound"`
 	AutoStart       bool      `json:"autoStart"`
 	FRP             FRPConfig `json:"frp"`
 }
@@ -43,6 +44,7 @@ func DefaultConfig() AppConfig {
 		LanAuthRequired: false,
 		DefaultDuration: 30,
 		SoundEnabled:    true,
+		CustomSound:     "",
 		AutoStart:       true,
 		FRP: FRPConfig{
 			Enabled:    false,

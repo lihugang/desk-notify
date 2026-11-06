@@ -2,13 +2,13 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/lihugang/desk-notify/core/pkg/api"
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
+	"github.com/lihugang/desk-notify/core/pkg/desktop"
 	"github.com/lihugang/desk-notify/core/pkg/storage"
 	"github.com/lihugang/desk-notify/core/pkg/tunnel"
 )
@@ -41,16 +41,19 @@ func main() {
 	// 3. Initialize File Storage & Hardlink Manager
 	fileStorage := storage.NewStorage(dataDir)
 
-	// 4. Initialize Tunnel (Mock in dev, FRP in release)
-	tun := tunnel.NewMockTunnel()
+	// 4. Initialize Tunnel (Mock in dev, FRP in release via build tags)
+	var tun tunnel.Tunnel = initTunnel()
 
-	// 5. Initialize Embedded Static Web Files
+	// 5. Initialize Desktop Runtime (Wails v3 on Windows, Headless Web on Linux/Dev)
+	desktopMgr := desktop.NewManager()
+
+	// 6. Initialize Embedded Static Web Files
 	staticFS := getStaticFS()
 
-	// 6. Start Web Server
-	srv := api.NewServer(cfgMgr, store, fileStorage, tun, staticFS)
+	// 7. Start Web Server
+	srv := api.NewServer(cfgMgr, store, fileStorage, tun, desktopMgr, staticFS)
 	go func() {
-		if err := srv.Start(); err != nil {
+		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("[DeskNotify] HTTP server error: %v\n", err)
 		}
 	}()
@@ -59,10 +62,10 @@ func main() {
 	fmt.Printf("[DeskNotify] 桌面通知卡片窗口已映射至: http://localhost:%d/card\n", cfg.Port)
 	fmt.Printf("[DeskNotify] 系统设置页面已映射至: http://localhost:%d/settings\n", cfg.Port)
 
-	// Wait for termination signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
+	// 8. Run Desktop Event Loop (Wails event loop on Windows, Signal wait on Linux/Dev)
+	if err := desktopMgr.Run(cfgMgr); err != nil {
+		fmt.Printf("[DeskNotify] Desktop runtime exit with error: %v\n", err)
+	}
 
 	fmt.Println("\n[DeskNotify] 正在安全停止服务...")
 	_ = srv.Stop()

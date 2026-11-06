@@ -40,3 +40,12 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Certificates & Private Keys
+*.pfx
+*.key
+certs/*.pfx
+certs/*.key
+certs/*.csr
+certs/*.cnf
+scratch/

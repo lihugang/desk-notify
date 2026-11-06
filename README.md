@@ -8,6 +8,8 @@
 
 - 🖥️ **一体化运行架构**：班级 Windows 电脑运行单文件绿色版 `.exe`，后台静默工作，托盘常驻。
 - 🔔 **桌面置顶卡片**：醒目、大字号通知悬浮窗（`alwaysOnTop`），自适应 Markdown 渲染，多图平铺与课件附件卡片展示，支持音效与倒计时自动隐去。
+  - **默认内嵌音效**：内置经过精心挑选的 CC0 高品质清脆提示音，无需依赖外部文件，单文件打包开箱即播。
+  - **支持自定义提示音**：支持在系统设置中一键试听与切换内置风格（清脆风铃、极简提示、柔和气泡等），或上传本地音频文件（`.mp3` / `.wav` / `.ogg`）及自定义音频路径。
 - 📱 **教师端 PWA 移动应用**：
   - 手机扫码即可直接访问，支持安装至手机桌面（PWA Standalone）。
   - 隐藏原始 Markdown 语法，提供直观的可视化轻量排版。
@@ -33,6 +35,8 @@ desk-notify/
 ├── core/                        # 核心 Go 应用
 │   ├── main.go                  # 应用入口与生命周期管理
 │   ├── embed.go                 # 嵌入打包好的静态 Web 前端资源
+│   ├── tunnel_mock.go           # 条件编译：本地开发 Mock 穿透 (//go:build !frp)
+│   ├── tunnel_frp.go            # 条件编译：正式打包 FRP 原生穿透 (//go:build frp)
 │   └── pkg/
 │       ├── api/                 # HTTP/WebSocket 接口服务
 │       ├── auth/                # 内网检测与 JWT 动态鉴权中间件
@@ -84,7 +88,7 @@ cd core
 go mod tidy
 
 # 启动服务 (访问 http://localhost:8920)
-go run main.go
+go run .
 ```
 
 访问地址：
