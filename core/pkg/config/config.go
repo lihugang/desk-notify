@@ -77,12 +77,12 @@ func GetDocumentsDir(className string) string {
 	if runtime.GOOS == "windows" {
 		userProfile := os.Getenv("USERPROFILE")
 		if userProfile != "" {
-			return filepath.Join(userProfile, "Documents", "班级通知", className)
+			return filepath.Join(userProfile, "Documents", "DeskNotify", className)
 		}
 	}
 	home, err := os.UserHomeDir()
 	if err == nil {
-		return filepath.Join(home, "Documents", "班级通知", className)
+		return filepath.Join(home, "Documents", "DeskNotify", className)
 	}
 	return filepath.Join("./dev_data", "Documents", className)
 }
