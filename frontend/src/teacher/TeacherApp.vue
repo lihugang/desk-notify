@@ -29,14 +29,14 @@
           <Lock class="w-6 h-6" />
         </div>
         <div>
-          <h2 class="text-lg font-bold text-slate-900">公网访问安全验证</h2>
-          <p class="text-xs text-slate-500 mt-1">当前通过公网/外部通道访问，请输入教师投递口令</p>
+          <h2 class="text-lg font-bold text-slate-900">访问安全验证</h2>
+          <p class="text-xs text-slate-500 mt-1">请输入统一密码以进行通知投递</p>
         </div>
         <div class="flex max-w-xs mx-auto gap-2">
           <input
             v-model="passwordInput"
             type="password"
-            placeholder="输入访问口令"
+            placeholder="输入访问密码"
             class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             @keyup.enter="handleLogin"
           />
@@ -83,40 +83,156 @@
           </div>
 
           <div class="flex items-center space-x-2">
-            <!-- Urgent level selection -->
-            <select v-model="messageLevel" class="text-xs bg-white border border-slate-200 rounded-md px-2 py-1 focus:ring-1 focus:ring-blue-500">
-              <option value="info">普通通知</option>
-              <option value="important">重要通知</option>
-              <option value="urgent">紧急提醒</option>
-            </select>
+            <!-- Toggle Preview Button -->
+            <button
+              @click="isPreview = !isPreview"
+              type="button"
+              class="px-2.5 py-1 text-xs rounded-lg border flex items-center gap-1.5 transition font-medium cursor-pointer"
+              :class="isPreview ? 'bg-blue-50 border-blue-300 text-blue-600 shadow-2xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'"
+              :title="isPreview ? '切换回文本编辑' : '大屏展示效果预览'"
+            >
+              <component :is="isPreview ? Edit3 : Eye" class="w-3.5 h-3.5" />
+              <span>{{ isPreview ? '返回编辑' : '效果预览' }}</span>
+            </button>
+
+            <!-- Pinned display toggle -->
+            <label
+              class="flex items-center space-x-1.5 cursor-pointer text-xs select-none py-1 px-2.5 rounded-lg border transition"
+              :class="isPinned ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'"
+              title="置顶显示：弹窗置顶并抢走焦点；不置顶：后台静默打开并闪烁任务栏"
+            >
+              <input
+                type="checkbox"
+                v-model="isPinned"
+                class="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+              />
+              <Pin class="w-3.5 h-3.5" :class="isPinned ? 'text-amber-600 fill-amber-500/20' : 'text-slate-400'" />
+              <span class="font-medium">置顶显示</span>
+            </label>
           </div>
         </div>
 
-        <!-- Textarea / Paste Area -->
-        <div class="p-4" @paste="handlePaste">
+        <!-- Mode: Preview Mode -->
+        <div v-if="isPreview" class="p-5 min-h-[260px] bg-slate-50/50 space-y-4">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-200/80 text-xs">
+            <span class="font-medium text-slate-500 flex items-center gap-1.5">
+              <Eye class="w-3.5 h-3.5 text-blue-500" />
+              <span>大屏呈现效果预览</span>
+            </span>
+            <span
+              class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+              :class="isPinned ? 'bg-amber-500 text-white' : 'bg-blue-500 text-white'"
+            >
+              {{ isPinned ? '强提醒·置顶卡片' : '常规通知' }}
+            </span>
+          </div>
+
+          <!-- Rendered Markdown Content -->
+          <div
+            class="markdown-content text-slate-800 text-base leading-relaxed bg-white p-4 rounded-xl border border-slate-200/60 shadow-2xs"
+            v-html="renderedMarkdown"
+          ></div>
+
+          <!-- Preview Images Grid -->
+          <div v-if="images && images.length > 0" class="pt-2">
+            <p class="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
+              <ImageIcon class="w-3.5 h-3.5 text-blue-500" />
+              <span>图片 ({{ images.length }}张 · 点击放大预览)</span>
+            </p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div
+                v-for="(img, idx) in images"
+                :key="idx"
+                @click="previewImage(img.preview)"
+                class="group relative rounded-xl overflow-hidden border border-slate-200 bg-white aspect-video cursor-pointer hover:border-blue-400 hover:shadow-md transition shadow-2xs"
+                title="点击放大预览"
+              >
+                <img :src="img.preview" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                <div class="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 text-white text-xs font-medium">
+                  <ZoomIn class="w-4 h-4" />
+                  <span>放大预览</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Preview Attachments List -->
+          <div v-if="attachments && attachments.length > 0" class="pt-2">
+            <p class="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
+              <Paperclip class="w-3.5 h-3.5 text-blue-500" />
+              <span>附件 ({{ attachments.length }}个)</span>
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div
+                v-for="(file, idx) in attachments"
+                :key="idx"
+                class="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-xl text-xs"
+              >
+                <div class="flex items-center space-x-2 truncate">
+                  <FileText class="w-4 h-4 text-blue-600 flex-shrink-0" />
+                  <span class="truncate font-medium text-slate-700">{{ file.name }}</span>
+                  <span class="text-slate-400">({{ formatSize(file.size) }})</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mode: Textarea / Paste Area (Edit Mode) -->
+        <div v-else class="p-4 sm:p-5" @paste="handlePaste">
           <textarea
             ref="textareaRef"
             v-model="textContent"
-            rows="5"
+            rows="10"
             placeholder="请输入要投递给班级大屏的通知正文...（可直接按 Ctrl+V 粘贴剪贴板截图）"
-            class="w-full text-base placeholder-slate-400 focus:outline-none resize-none leading-relaxed"
+            class="w-full text-base placeholder-slate-400 focus:outline-none resize-y min-h-[240px] leading-relaxed text-slate-800"
           ></textarea>
 
           <!-- Uploaded Images Grid -->
-          <div v-if="images && images.length > 0" class="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
-            <div v-for="(img, idx) in images" :key="idx" class="relative group rounded-lg overflow-hidden border border-slate-200 aspect-video bg-slate-100">
-              <img :src="img.preview" class="w-full h-full object-cover" />
-              <button
-                @click="removeImage(idx)"
-                class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-90 transition"
+          <div v-if="images && images.length > 0" class="mt-4 pt-3 border-t border-slate-100">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                <ImageIcon class="w-3.5 h-3.5 text-blue-600" />
+                <span>已添加图片 ({{ images.length }}张 · 点击图片可放大预览)</span>
+              </span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              <div
+                v-for="(img, idx) in images"
+                :key="idx"
+                @click="previewImage(img.preview)"
+                class="group relative rounded-xl overflow-hidden border border-slate-200 bg-slate-50 aspect-video cursor-pointer hover:border-blue-400 hover:shadow-md transition shadow-2xs"
+                title="点击放大预览"
               >
-                <X class="w-3 h-3" />
-              </button>
+                <img :src="img.preview" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                <!-- Hover overlay -->
+                <div class="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 text-white text-xs font-medium">
+                  <ZoomIn class="w-4 h-4" />
+                  <span>预览</span>
+                </div>
+                <!-- Remove button -->
+                <button
+                  type="button"
+                  @click.stop="removeImage(idx)"
+                  class="absolute top-1.5 right-1.5 bg-black/60 hover:bg-red-600 text-white rounded-full p-1 opacity-90 transition z-10"
+                  title="移除此图片"
+                >
+                  <X class="w-3.5 h-3.5" />
+                </button>
+                <!-- Image name / size bar -->
+                <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent p-1.5 text-[10px] text-white/90 truncate pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
+                  {{ img.name }} ({{ formatSize(img.size) }})
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- Uploaded Attachments List -->
-          <div v-if="attachments && attachments.length > 0" class="mt-3 space-y-2">
+          <div v-if="attachments && attachments.length > 0" class="mt-4 pt-3 border-t border-slate-100 space-y-2">
+            <div class="text-xs font-semibold text-slate-500 mb-1 flex items-center gap-1">
+              <Paperclip class="w-3.5 h-3.5 text-blue-600" />
+              <span>已添加附件 ({{ attachments.length }}个)</span>
+            </div>
             <div
               v-for="(file, idx) in attachments"
               :key="idx"
@@ -127,7 +243,7 @@
                 <span class="truncate font-medium text-slate-700">{{ file.name }}</span>
                 <span class="text-slate-400">({{ formatSize(file.size) }})</span>
               </div>
-              <button @click="removeAttachment(idx)" class="text-slate-400 hover:text-red-500 p-1">
+              <button @click="removeAttachment(idx)" class="text-slate-400 hover:text-red-500 p-1" title="删除附件">
                 <X class="w-3.5 h-3.5" />
               </button>
             </div>
@@ -136,9 +252,9 @@
 
         <!-- Editor Footer & Submit -->
         <div class="bg-slate-50/80 border-t border-slate-200 px-4 py-3 flex items-center justify-between">
-          <div class="text-xs text-slate-400 flex items-center gap-1.5">
-            <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>桌面置顶卡片（需手动点击关闭）</span>
+          <div class="text-xs text-slate-500 flex items-center gap-1.5">
+            <span class="inline-block w-2 h-2 rounded-full" :class="isPinned ? 'bg-amber-500' : 'bg-blue-500'"></span>
+            <span>{{ isPinned ? '桌面置顶弹窗（强提醒·抢占焦点）' : '常规通知（后台默默打开·任务栏闪烁）' }}</span>
           </div>
 
           <button
@@ -157,16 +273,21 @@
         <HistoryList ref="historyListRef" title="投递历史记录" :page-size="10" />
       </section>
     </main>
+
+    <!-- Image Lightbox Modal -->
+    <ImageLightbox :image-url="activeLightboxImage" @close="activeLightboxImage = null" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
   Bell, Lock, Bold, Italic, Heading2, List, Quote,
-  ImageIcon, Paperclip, Send, X, FileText
+  ImageIcon, Paperclip, Send, X, FileText, Pin, ZoomIn, Eye, Edit3
 } from 'lucide-vue-next';
+import { marked } from 'marked';
 import HistoryList from '../components/HistoryList.vue';
+import ImageLightbox from '../components/ImageLightbox.vue';
 
 interface UploadItem {
   file: File;
@@ -184,7 +305,7 @@ const authError = ref('');
 const loggingIn = ref(false);
 
 const textContent = ref('');
-const messageLevel = ref<'info' | 'important' | 'urgent'>('info');
+const isPinned = ref(true);
 const duration = ref(0);
 const images = ref<UploadItem[]>([]);
 const attachments = ref<UploadItem[]>([]);
@@ -192,8 +313,30 @@ const submitting = ref(false);
 const historyListRef = ref<InstanceType<typeof HistoryList> | null>(null);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
+const activeLightboxImage = ref<string | null>(null);
+const isPreview = ref(false);
+
+const renderedMarkdown = computed(() => {
+  if (!textContent.value.trim()) {
+    return '<p class="text-slate-400 italic">（暂无正文内容）</p>';
+  }
+  return marked.parse(textContent.value, { breaks: true, gfm: true }) as string;
+});
+
+function previewImage(url?: string) {
+  if (url) {
+    activeLightboxImage.value = url;
+  }
+}
+
 onMounted(() => {
   checkAuthAndStatus();
+});
+
+onUnmounted(() => {
+  images.value.forEach(img => {
+    if (img.preview) URL.revokeObjectURL(img.preview);
+  });
 });
 
 async function checkAuthAndStatus() {
@@ -228,7 +371,7 @@ async function handleLogin() {
       authRequired.value = false;
       historyListRef.value?.reload();
     } else {
-      authError.value = '口令错误，请重新输入';
+      authError.value = '密码错误，请重新输入';
     }
   } catch (e) {
     authError.value = '网络错误，请稍后再试';
@@ -302,6 +445,13 @@ function handleFileSelect(e: Event) {
 }
 
 function removeImage(idx: number) {
+  const item = images.value[idx];
+  if (item?.preview) {
+    if (activeLightboxImage.value === item.preview) {
+      activeLightboxImage.value = null;
+    }
+    URL.revokeObjectURL(item.preview);
+  }
   images.value.splice(idx, 1);
 }
 
@@ -316,7 +466,7 @@ async function handleSubmit() {
   try {
     const formData = new FormData();
     formData.append('content', textContent.value);
-    formData.append('level', messageLevel.value);
+    formData.append('pinned', isPinned.value ? 'true' : 'false');
     formData.append('duration', duration.value.toString());
 
     images.value.forEach(img => {
@@ -332,9 +482,13 @@ async function handleSubmit() {
     });
 
     if (res.ok) {
+      images.value.forEach(img => {
+        if (img.preview) URL.revokeObjectURL(img.preview);
+      });
       textContent.value = '';
       images.value = [];
       attachments.value = [];
+      isPreview.value = false;
       historyListRef.value?.reload();
       alert('已成功投递到班级大屏！');
     } else {

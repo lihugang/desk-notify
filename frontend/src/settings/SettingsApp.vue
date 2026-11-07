@@ -50,15 +50,6 @@
         </button>
 
         <button
-          @click="activeTab = 'history'"
-          :class="activeTab === 'history' ? 'border-b-2 border-blue-600 text-blue-600 font-bold bg-blue-50/40' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'"
-          class="flex-1 py-3 text-xs sm:text-sm font-semibold text-center transition flex items-center justify-center gap-1.5"
-        >
-          <History class="w-4 h-4" />
-          <span>历史通知</span>
-        </button>
-
-        <button
           @click="activeTab = 'basic'"
           :class="activeTab === 'basic' ? 'border-b-2 border-blue-600 text-blue-600 font-bold bg-blue-50/40' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'"
           class="flex-1 py-3 text-xs sm:text-sm font-semibold text-center transition flex items-center justify-center gap-1.5"
@@ -77,11 +68,6 @@
           <span v-if="!isUnlocked" class="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-500 rounded">需口令</span>
           <span v-else class="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-700 rounded font-normal">已解锁</span>
         </button>
-      </div>
-
-      <!-- Tab: History Notifications Feed (Desktop Big Screen) -->
-      <div v-if="activeTab === 'history'" class="p-5 sm:p-6 space-y-4 max-h-[calc(100vh-140px)] overflow-y-auto">
-        <HistoryList title="班级全部历史通知" :page-size="10" />
       </div>
 
       <!-- Tab 1: QR Codes & Connection Addresses -->
@@ -367,13 +353,13 @@
             <Lock class="w-6 h-6" />
           </div>
           <div>
-            <h3 class="text-sm font-bold text-slate-800">安全验证 · 管理员密码</h3>
-            <p class="text-xs text-slate-500 mt-1">修改公网投递口令与暴露服务到公网属于高级设置，请输入管理密码以解锁配置</p>
+            <h3 class="text-sm font-bold text-slate-800">安全验证 · 统一密码</h3>
+            <p class="text-xs text-slate-500 mt-1">修改公网服务与系统安全设置属于高级操作，请输入统一密码以解锁配置</p>
           </div>
 
           <div class="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-800 text-left">
             <span>初始默认密码：<strong class="font-mono text-amber-900">123456</strong></span>
-            <span class="block text-[10px] text-amber-700 mt-0.5">采用 bcrypt 安全加盐比对，不以明文存储</span>
+            <span class="block text-[10px] text-amber-700 mt-0.5">投递密码与管理密码已统一为同一口令，采用 bcrypt 加盐安全比对</span>
           </div>
 
           <div class="space-y-2">
@@ -383,7 +369,7 @@
                 :type="showAdminPassword ? 'text' : 'password'"
                 @keyup.enter="unlockAdmin"
                 class="w-full px-3 py-2 pr-10 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                placeholder="请输入管理密码"
+                placeholder="请输入系统统一密码"
               />
               <button
                 type="button"
@@ -420,17 +406,20 @@
             </button>
           </div>
 
-          <!-- Section 1: Public Delivery Password -->
+          <!-- Section 1: Unified System Password -->
           <div class="space-y-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <label class="block text-xs font-semibold text-slate-800">公网投递口令 (修改口令)</label>
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-semibold text-slate-800">系统统一密码 (投递与管理口令)</label>
+              <span class="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-medium">投递与管理合一</span>
+            </div>
             <input
-              v-model="newPublicPassword"
+              v-model="newPassword"
               type="password"
               class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              :placeholder="config.hasPublicPassword ? '留空表示保持原有口令不变' : '设置教师公网投递口令'"
+              :placeholder="(config.hasPassword || config.hasPublicPassword) ? '留空表示保持原有密码不变' : '设置系统统一密码'"
             />
             <p class="text-[11px] text-slate-400 leading-relaxed">
-              教师在公网或校外扫码投递时须验证此口令。密码保存时将使用 bcrypt 加盐安全哈希，配置文件中绝不保存明文。
+              投递密码与管理密码已统一合并为同一个密码。外部网络教师扫码投递时验证此密码，同时用于解锁与修改本机设置。修改后两处同时生效，绝不保存明文。
             </p>
           </div>
 
@@ -511,18 +500,6 @@
             </div>
           </div>
 
-          <!-- Section 3: Modify Admin Password -->
-          <div class="space-y-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <label class="block text-xs font-semibold text-slate-800">修改管理密码</label>
-            <input
-              v-model="newAdminPassword"
-              type="password"
-              class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="留空表示不修改管理密码"
-            />
-            <p class="text-[11px] text-slate-400">用于解锁本安全与公网设置页面的密码。建议修改为仅班主任或管理员掌握的密码。</p>
-          </div>
-
           <div class="pt-3 flex justify-end">
             <button
               @click="saveSecurityConfig"
@@ -583,7 +560,6 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import {
   QrCode,
   Settings,
-  History,
   Lock,
   Unlock,
   ShieldCheck,
@@ -601,7 +577,6 @@ import {
 } from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import type { AppConfig } from '../types';
-import HistoryList from '../components/HistoryList.vue';
 
 interface AddressItem {
   id: string;
@@ -612,7 +587,7 @@ interface AddressItem {
   desc: string;
 }
 
-const activeTab = ref<'qrcode' | 'history' | 'basic' | 'security'>('qrcode');
+const activeTab = ref<'qrcode' | 'basic' | 'security'>('qrcode');
 const lanIPs = ref<string[]>(['127.0.0.1']);
 const frpPublicUrl = ref('');
 const saving = ref(false);
@@ -626,8 +601,7 @@ const verifyingAdmin = ref(false);
 const adminError = ref('');
 const adminToken = ref('');
 
-const newPublicPassword = ref('');
-const newAdminPassword = ref('');
+const newPassword = ref('');
 
 // Sound preview & upload
 const audioFileInputRef = ref<HTMLInputElement | null>(null);
@@ -652,6 +626,7 @@ const presets = [
 const config = ref<AppConfig>({
   className: '2907',
   port: 8920,
+  hasPassword: true,
   hasPublicPassword: true,
   lanAuthRequired: false,
   soundEnabled: true,
@@ -742,14 +717,18 @@ watch(displayAddresses, () => {
 }, { deep: true });
 
 onMounted(async () => {
-  if (window.location.hash === '#history' || window.location.search.includes('tab=history')) {
-    activeTab.value = 'history';
-  }
-  window.addEventListener('hashchange', () => {
-    if (window.location.hash === '#history') {
-      activeTab.value = 'history';
-    }
+  window.addEventListener('beforeunload', () => {
+    relockAdmin();
   });
+  window.addEventListener('pagehide', () => {
+    relockAdmin();
+  });
+
+  if (typeof window !== 'undefined') {
+    (window as any).__dnRelockAdmin = () => {
+      relockAdmin();
+    };
+  }
 
   await fetchStatusAndConfig();
   nextTick(() => {
@@ -799,7 +778,7 @@ function openZoom(item: AddressItem) {
 
 async function unlockAdmin() {
   if (!adminPasswordInput.value) {
-    adminError.value = '请输入管理密码';
+    adminError.value = '请输入系统统一密码';
     return;
   }
 
@@ -820,7 +799,7 @@ async function unlockAdmin() {
       adminPasswordInput.value = '';
     } else {
       const msg = await res.text();
-      adminError.value = msg || '管理密码错误，请重新输入';
+      adminError.value = msg || '密码错误，请重新输入';
     }
   } catch (e) {
     adminError.value = '网络异常，验证失败';
@@ -832,8 +811,13 @@ async function unlockAdmin() {
 function relockAdmin() {
   isUnlocked.value = false;
   adminToken.value = '';
-  newPublicPassword.value = '';
-  newAdminPassword.value = '';
+  newPassword.value = '';
+  adminPasswordInput.value = '';
+  adminError.value = '';
+  if (typeof document !== 'undefined') {
+    document.cookie = 'dn_admin_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  }
+  fetch('/api/config/lock-admin', { method: 'POST', keepalive: true }).catch(() => {});
 }
 
 async function saveBasicConfig() {
@@ -868,11 +852,10 @@ async function saveSecurityConfig() {
       frp: config.value.frp,
       lanAuthRequired: config.value.lanAuthRequired
     };
-    if (newPublicPassword.value.trim()) {
-      payload.newPublicPassword = newPublicPassword.value.trim();
-    }
-    if (newAdminPassword.value.trim()) {
-      payload.newAdminPassword = newAdminPassword.value.trim();
+    if (newPassword.value.trim()) {
+      payload.newPassword = newPassword.value.trim();
+      payload.newPublicPassword = newPassword.value.trim();
+      payload.newAdminPassword = newPassword.value.trim();
     }
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -887,9 +870,12 @@ async function saveSecurityConfig() {
     });
 
     if (res.ok) {
-      alert('安全与公网配置已成功更新并生效！');
-      newPublicPassword.value = '';
-      newAdminPassword.value = '';
+      const data = await res.json().catch(() => ({}));
+      if (data.adminToken) {
+        adminToken.value = data.adminToken;
+      }
+      alert('安全与公网配置已成功保存并热重载生效！');
+      newPassword.value = '';
       await fetchStatusAndConfig();
     } else {
       const msg = await res.text();
@@ -908,8 +894,9 @@ function copyUrl(text: string) {
 }
 
 async function closeWindow() {
+  relockAdmin();
   try {
-    await fetch('/api/window/settings-hide');
+    await fetch('/api/window/settings-hide', { method: 'POST', keepalive: true });
   } catch {}
   if (typeof window !== 'undefined' && (window as any).close) {
     (window as any).close();

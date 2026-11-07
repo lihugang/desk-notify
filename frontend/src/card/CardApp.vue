@@ -1,37 +1,49 @@
 <template>
   <div
-    v-if="currentMessage || viewMode === 'history'"
-    class="fixed inset-0 p-4 sm:p-6 flex flex-col justify-start items-center bg-transparent pointer-events-auto"
+    v-if="notifications.length > 0 || viewMode === 'history'"
+    class="fixed inset-0 p-3 sm:p-5 flex flex-col justify-start items-center bg-transparent pointer-events-auto cursor-default"
+    @click.self="handleBackdropClick"
   >
     <!-- Card Container -->
     <div
-      class="w-full max-w-2xl bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform transition-all duration-300 animate-slide-in text-slate-800 flex flex-col"
-      :class="currentMessage ? getCardBorderClass(currentMessage.level) : 'ring-1 ring-blue-500/20'"
+      class="relative w-full max-w-2xl bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform transition-all duration-300 animate-slide-in text-slate-800 flex flex-col h-full max-h-[70vh]"
+      :class="notifications.length > 0 && notifications[0].pinned ? 'ring-2 ring-amber-500/40 shadow-amber-500/10' : 'ring-1 ring-blue-500/20 shadow-blue-500/5'"
     >
-      <!-- Top Bar: Level, Time, Countdown, History Toggle & Close -->
+      <!-- Top Resize Border (Vertical drag resize only) -->
       <div
-        class="px-6 py-3.5 flex items-center justify-between border-b border-slate-100 select-none cursor-move flex-shrink-0"
-        :class="currentMessage ? getHeaderBgClass(currentMessage.level) : 'bg-slate-50'"
-        style="--wails-draggable: drag;"
+        class="absolute top-0 left-0 right-0 h-2 cursor-ns-resize z-50 select-none hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors"
+        title="上下拖动调整窗口高度"
+        data-no-drag
+        style="-webkit-app-region: no-drag;"
+        @mousedown.stop="handleResizeTop"
+      ></div>
+
+      <!-- Top Bar: Level, Time, Countdown, History Toggle, Minimize & Close -->
+      <div
+        class="px-6 py-3.5 flex items-center justify-between border-b border-slate-100 select-none cursor-move flex-shrink-0 drag-header"
+        :class="notifications.length > 0 && notifications[0].pinned ? 'bg-amber-50/70' : 'bg-slate-50'"
+        style="-webkit-app-region: drag; --wails-draggable: drag;"
+        @mousedown="handleHeaderMouseDown"
       >
-        <div class="flex items-center space-x-3 pointer-events-none">
+        <div class="flex items-center space-x-2.5 pointer-events-none">
           <span
-            v-if="viewMode === 'current' && currentMessage"
-            class="px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-xs"
-            :class="getBadgeClass(currentMessage.level)"
+            v-if="viewMode === 'current'"
+            class="px-2.5 py-1 rounded-full text-xs font-bold tracking-wide shadow-xs flex items-center gap-1"
+            :class="notifications.length > 0 && notifications[0].pinned ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white'"
           >
-            {{ getLevelLabel(currentMessage.level) }}
+            <Bell class="w-3 h-3" />
+            <span>最新通知 (最近90分钟)</span>
           </span>
           <span
             v-else
-            class="px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-xs bg-indigo-600 text-white"
+            class="px-2.5 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-xs bg-indigo-600 text-white"
           >
             历史记录
           </span>
           <span class="text-xs text-slate-500 font-medium">{{ classroomName }} · 桌面通知</span>
         </div>
 
-        <div class="flex items-center space-x-2" style="--wails-draggable: no-drag;">
+        <div class="flex items-center space-x-2" style="-webkit-app-region: no-drag;" data-no-drag>
           <!-- Countdown Timer (Current Mode only) -->
           <div
             v-if="viewMode === 'current' && remainingSeconds > 0"
@@ -46,10 +58,23 @@
             @click="toggleViewMode"
             class="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-200 transition flex items-center gap-1 cursor-pointer shadow-2xs"
             :class="viewMode === 'history' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-slate-100 text-slate-600'"
-            :title="viewMode === 'history' ? '返回当前通知' : '查看历史通知记录'"
+            :title="viewMode === 'history' ? '返回最新通知' : '查看历史通知记录'"
+            data-no-drag
+            style="-webkit-app-region: no-drag;"
           >
             <History class="w-3.5 h-3.5" />
             <span>{{ viewMode === 'history' ? '返回最新' : '历史通知' }}</span>
+          </button>
+
+          <!-- Minimize Button -->
+          <button
+            @click="minimizeCard"
+            class="p-1.5 rounded-full hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 transition cursor-pointer"
+            title="最小化"
+            data-no-drag
+            style="-webkit-app-region: no-drag;"
+          >
+            <Minus class="w-4 h-4" />
           </button>
 
           <!-- Manual Close Button -->
@@ -57,61 +82,125 @@
             @click="closeCard"
             class="p-1.5 rounded-full hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 transition cursor-pointer"
             title="关闭通知"
+            data-no-drag
+            style="-webkit-app-region: no-drag;"
           >
             <X class="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      <!-- Body: History Feed View (Desktop Big Screen) -->
-      <div v-if="viewMode === 'history'" class="p-5 max-h-[72vh] overflow-y-auto space-y-4">
+      <!-- Body: History Feed View (Desktop Big Screen 70% Frame) -->
+      <div v-if="viewMode === 'history'" class="p-5 flex-1 overflow-y-auto space-y-4">
         <HistoryList title="班级全部历史通知" :page-size="8" />
       </div>
 
-      <!-- Body: Current Notification View -->
-      <div v-else-if="currentMessage" class="p-6 max-h-[70vh] overflow-y-auto space-y-5">
-        <!-- Rendered Markdown Content (No truncation) -->
+      <!-- Body: Current Notifications View (Last 90 Minutes) -->
+      <div v-else-if="notifications.length > 0" class="p-5 overflow-y-auto flex-1 space-y-4">
         <div
-          class="markdown-content text-slate-800 text-base sm:text-lg leading-relaxed font-normal"
-          v-html="renderedMarkdown"
-        ></div>
+          v-for="(item, idx) in notifications"
+          :key="item.id || idx"
+          class="bg-white/90 rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-2xs space-y-3"
+          :class="item.pinned ? 'ring-1 ring-amber-400/40 bg-amber-50/20' : ''"
+        >
+          <!-- Metadata Bar: Level, Time Point, Sender -->
+          <div class="flex items-center justify-between text-xs pb-2 border-b border-slate-100/90 flex-wrap gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span
+                class="px-2.5 py-0.5 rounded-full font-semibold text-[11px] shadow-2xs flex items-center gap-1"
+                :class="item.pinned ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-blue-50 text-blue-700 border border-blue-200'"
+              >
+                <Pin v-if="item.pinned" class="w-3 h-3 text-amber-600" />
+                <span>{{ item.pinned ? '置顶提醒' : '班级通知' }}</span>
+              </span>
 
-        <!-- Inline Images -->
-        <div v-if="currentMessage.images?.length" class="grid grid-cols-2 gap-3 pt-2">
-          <div
-            v-for="(imgUrl, idx) in currentMessage.images"
-            :key="idx"
-            class="rounded-xl overflow-hidden border border-slate-200 bg-slate-50 shadow-xs cursor-pointer hover:opacity-95 transition"
-            @click="activeLightboxImage = imgUrl"
-          >
-            <img :src="imgUrl" class="w-full max-h-72 object-contain" alt="通知图片" />
+              <!-- Time Point Display clearly visible -->
+              <span class="text-slate-600 font-mono text-[11px] font-medium flex items-center gap-1 bg-slate-50 border border-slate-200/80 px-2.5 py-0.5 rounded-md">
+                <Clock class="w-3 h-3 text-slate-400" />
+                <span>{{ formatExactTime(item.createdAt) }}</span>
+              </span>
+
+              <span v-if="item.sender" class="text-slate-500 text-[11px] font-medium bg-slate-100 px-2 py-0.5 rounded-md">
+                {{ item.sender }}
+              </span>
+            </div>
+
+            <div v-if="idx === 0 && remainingSeconds > 0" class="flex items-center gap-1 text-xs font-mono bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+              <Clock class="w-3 h-3" />
+              <span>{{ remainingSeconds }}s 后自动关闭</span>
+            </div>
           </div>
-        </div>
 
-        <!-- Attachments Cards -->
-        <div v-if="currentMessage.attachments?.length" class="pt-3 border-t border-slate-100 space-y-2">
-          <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">课件与附件 (点击直接下载)</p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <a
-              v-for="att in currentMessage.attachments"
-              :key="att.id"
-              :href="getDownloadUrl(att)"
-              target="_blank"
-              :download="att.name"
-              class="flex items-center p-3 rounded-2xl bg-slate-50 hover:bg-blue-50/60 border border-slate-200 hover:border-blue-200 transition group"
+          <!-- Markdown Content -->
+          <div
+            class="markdown-content text-slate-800 text-base leading-relaxed font-normal"
+            v-html="renderMarkdown(item.content)"
+          ></div>
+
+          <!-- Inline Images -->
+          <div v-if="item.images && item.images.length > 0" class="grid grid-cols-2 gap-2.5 pt-1">
+            <div
+              v-for="(imgUrl, imgIdx) in item.images"
+              :key="imgIdx"
+              class="rounded-xl overflow-hidden border border-slate-200 bg-slate-50 shadow-xs cursor-pointer hover:opacity-95 transition"
+              @click="activeLightboxImage = imgUrl"
             >
-              <div class="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mr-3 flex-shrink-0 group-hover:scale-105 transition-transform">
-                <FileText class="w-5 h-5" />
+              <img :src="imgUrl" class="w-full max-h-60 object-contain" alt="通知图片" />
+            </div>
+          </div>
+
+          <!-- Attachments Cards -->
+          <div v-if="item.attachments && item.attachments.length > 0" class="pt-2 border-t border-slate-100 space-y-2">
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">课件与附件</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div
+                v-for="att in item.attachments"
+                :key="att.id"
+                class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-blue-50/60 border border-slate-200 hover:border-blue-200 transition group select-none cursor-pointer"
+                @click="openAttachment(att)"
+                :title="'点击直接打开：' + att.name"
+              >
+                <div class="flex items-center space-x-2.5 truncate min-w-0 pr-2">
+                  <div class="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+                    <FileText class="w-4 h-4" />
+                  </div>
+                  <div class="truncate">
+                    <p class="text-xs font-semibold text-slate-800 truncate group-hover:text-blue-600 transition">{{ att.name }}</p>
+                    <p class="text-[10px] text-slate-400">{{ formatSize(att.size) }}</p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0" @click.stop>
+                  <button
+                    type="button"
+                    @click="revealAttachment(att)"
+                    class="p-1.5 rounded-lg bg-white hover:bg-blue-600 text-slate-500 hover:text-white border border-slate-200 hover:border-blue-600 shadow-2xs transition cursor-pointer"
+                    title="在文件夹中打开并选择此文件"
+                  >
+                    <Folder class="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    @click="openAttachment(att)"
+                    class="p-1.5 rounded-lg bg-white hover:bg-blue-600 text-slate-500 hover:text-white border border-slate-200 hover:border-blue-600 shadow-2xs transition cursor-pointer"
+                    title="直接打开此文件"
+                  >
+                    <ExternalLink class="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <div class="truncate flex-1">
-                <p class="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-600 transition">{{ att.name }}</p>
-                <p class="text-xs text-slate-400">{{ formatSize(att.size) }}</p>
-              </div>
-              <Download class="w-4 h-4 text-slate-400 group-hover:text-blue-600 ml-2 flex-shrink-0" />
-            </a>
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- Bottom Resize Border (Vertical drag resize only) -->
+      <div
+        class="absolute bottom-0 left-0 right-0 h-2.5 cursor-ns-resize z-50 select-none hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors"
+        title="上下拖动调整窗口高度"
+        data-no-drag
+        style="-webkit-app-region: no-drag;"
+        @mousedown.stop="handleResizeBottom"
+      ></div>
     </div>
 
     <!-- Image Lightbox Modal -->
@@ -121,30 +210,54 @@
   <!-- Empty State Card (When no notification exists) -->
   <div
     v-else-if="showEmptyState"
-    class="fixed inset-0 p-4 sm:p-6 flex flex-col justify-start items-center bg-transparent pointer-events-auto"
+    class="fixed inset-0 p-3 sm:p-5 flex flex-col justify-start items-center bg-transparent pointer-events-auto cursor-default"
+    @click.self="handleBackdropClick"
   >
     <div
-      class="w-full max-w-md bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform transition-all duration-300 animate-slide-in text-slate-800 flex flex-col"
+      class="relative w-full max-w-md bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform transition-all duration-300 animate-slide-in text-slate-800 flex flex-col"
     >
+      <!-- Top Resize Border -->
+      <div
+        class="absolute top-0 left-0 right-0 h-2 cursor-ns-resize z-50 select-none hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors"
+        title="上下拖动调整窗口高度"
+        data-no-drag
+        style="-webkit-app-region: no-drag;"
+        @mousedown.stop="handleResizeTop"
+      ></div>
+
       <!-- Top Bar -->
       <div
-        class="px-6 py-3.5 flex items-center justify-between border-b border-slate-100 select-none bg-slate-50 cursor-move flex-shrink-0"
-        style="--wails-draggable: drag;"
+        class="px-6 py-3.5 flex items-center justify-between border-b border-slate-100 select-none bg-slate-50 cursor-move flex-shrink-0 drag-header"
+        style="-webkit-app-region: drag; --wails-draggable: drag;"
+        @mousedown="handleHeaderMouseDown"
       >
         <div class="flex items-center space-x-2 pointer-events-none">
           <Bell class="w-4 h-4 text-blue-600" />
           <span class="text-xs text-slate-500 font-medium">{{ classroomName }} · 桌面通知</span>
         </div>
 
-        <div class="flex items-center space-x-2" style="--wails-draggable: no-drag;">
+        <div class="flex items-center space-x-2" style="-webkit-app-region: no-drag;" data-no-drag>
           <!-- History Mode Toggle Button -->
           <button
             @click="viewMode = 'history'; showEmptyState = false"
             class="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 transition flex items-center gap-1 cursor-pointer shadow-2xs"
             title="查看历史通知记录"
+            data-no-drag
+            style="-webkit-app-region: no-drag;"
           >
             <History class="w-3.5 h-3.5" />
             <span>历史通知</span>
+          </button>
+
+          <!-- Minimize Button -->
+          <button
+            @click="minimizeCard"
+            class="p-1.5 rounded-full hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 transition cursor-pointer"
+            title="最小化"
+            data-no-drag
+            style="-webkit-app-region: no-drag;"
+          >
+            <Minus class="w-4 h-4" />
           </button>
 
           <!-- Manual Close Button -->
@@ -152,6 +265,8 @@
             @click="closeCard"
             class="p-1.5 rounded-full hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 transition cursor-pointer"
             title="关闭窗口"
+            data-no-drag
+            style="-webkit-app-region: no-drag;"
           >
             <X class="w-5 h-5" />
           </button>
@@ -165,7 +280,7 @@
         </div>
         <div>
           <h3 class="text-lg font-bold text-slate-800">暂无最新通知</h3>
-          <p class="text-sm text-slate-400 mt-1">当前班级还没有收到任何教师通知</p>
+          <p class="text-sm text-slate-400 mt-1">最近 90 分钟内暂无收到新的班级通知</p>
         </div>
         <div class="pt-2">
           <button
@@ -176,19 +291,28 @@
           </button>
         </div>
       </div>
+
+      <!-- Bottom Resize Border -->
+      <div
+        class="absolute bottom-0 left-0 right-0 h-2.5 cursor-ns-resize z-50 select-none hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors"
+        title="上下拖动调整窗口高度"
+        data-no-drag
+        style="-webkit-app-region: no-drag;"
+        @mousedown.stop="handleResizeBottom"
+      ></div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { Clock, X, FileText, Download, History, Bell, Inbox } from 'lucide-vue-next';
+import { ref, onMounted } from 'vue';
+import { Clock, X, FileText, Folder, ExternalLink, History, Bell, Inbox, Minus, Pin } from 'lucide-vue-next';
 import { marked } from 'marked';
 import type { NotificationMessage, Attachment } from '../types';
 import HistoryList from '../components/HistoryList.vue';
 import ImageLightbox from '../components/ImageLightbox.vue';
 
-const currentMessage = ref<NotificationMessage | null>(null);
+const notifications = ref<NotificationMessage[]>([]);
 const classroomName = ref('班级大屏');
 const remainingSeconds = ref(0);
 const viewMode = ref<'current' | 'history'>('current');
@@ -196,20 +320,65 @@ const showEmptyState = ref(false);
 const activeLightboxImage = ref<string | null>(null);
 let timer: any = null;
 
-const renderedMarkdown = computed(() => {
-  if (!currentMessage.value?.content) return '';
-  return marked.parse(currentMessage.value.content, { breaks: true, gfm: true }) as string;
-});
+function renderMarkdown(content?: string): string {
+  if (!content) return '';
+  return marked.parse(content, { breaks: true, gfm: true }) as string;
+}
+
+function handleWindowInteraction() {
+  fetch('/api/window/stop-flash', { method: 'POST' }).catch(() => {});
+}
+
+// Transparent backdrop click handler -> closes the card window
+function handleBackdropClick() {
+  closeCard();
+}
+
+// Window header dragging
+function handleHeaderMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return;
+  const target = e.target as HTMLElement;
+  if (target.closest('button, a, input, select, textarea, [data-no-drag]')) {
+    return;
+  }
+  handleWindowInteraction();
+  if ((window as any).chrome?.webview?.postMessage) {
+    (window as any).chrome.webview.postMessage('wails:drag');
+  } else if ((window as any).webkit?.messageHandlers?.['external']?.postMessage) {
+    (window as any).webkit.messageHandlers['external'].postMessage('wails:drag');
+  }
+}
+
+// Top and bottom border vertical drag resizing
+function handleResizeTop(e: MouseEvent) {
+  if (e.button !== 0) return;
+  handleWindowInteraction();
+  if ((window as any).chrome?.webview?.postMessage) {
+    (window as any).chrome.webview.postMessage('wails:resize:n-resize');
+  }
+}
+
+function handleResizeBottom(e: MouseEvent) {
+  if (e.button !== 0) return;
+  handleWindowInteraction();
+  if ((window as any).chrome?.webview?.postMessage) {
+    (window as any).chrome.webview.postMessage('wails:resize:s-resize');
+  }
+}
 
 onMounted(() => {
   connectWebSocket();
   fetchLatestNotification(false);
 
   window.addEventListener('focus', () => {
-    if (!currentMessage.value && viewMode.value === 'current') {
+    handleWindowInteraction();
+    if (notifications.value.length === 0 && viewMode.value === 'current') {
       fetchLatestNotification(false);
     }
   });
+
+  window.addEventListener('pointerdown', handleWindowInteraction);
+  window.addEventListener('click', handleWindowInteraction);
 });
 
 function toggleViewMode() {
@@ -222,9 +391,9 @@ function toggleViewMode() {
     }
   } else {
     viewMode.value = 'current';
-    if (!currentMessage.value) {
+    if (notifications.value.length === 0) {
       fetchLatestNotification(false);
-    } else if (currentMessage.value.duration > 0 && remainingSeconds.value > 0) {
+    } else if (notifications.value[0]?.duration > 0 && remainingSeconds.value > 0) {
       startCountdown();
     }
   }
@@ -238,16 +407,28 @@ async function fetchLatestNotification(playSound: boolean = false) {
       if (data.className) {
         classroomName.value = data.className;
       }
-      if (data.hasNotification && data.notification) {
+      const rawList: NotificationMessage[] = data.notifications && data.notifications.length > 0
+        ? data.notifications
+        : (data.notification ? [data.notification] : []);
+
+      if (data.hasNotification && rawList.length > 0) {
         showEmptyState.value = false;
-        const msg: NotificationMessage = {
-          ...data.notification,
+        notifications.value = rawList.map((item) => ({
+          ...item,
           soundEnabled: data.soundEnabled,
-          soundUrl: data.soundUrl
-        };
-        showMessage(msg, playSound);
+          soundUrl: data.soundUrl,
+        }));
+        if (playSound && notifications.value[0]?.soundEnabled !== false) {
+          playAlertSound(notifications.value[0]?.soundUrl);
+        }
+        if (notifications.value[0]?.duration > 0) {
+          remainingSeconds.value = notifications.value[0].duration;
+          startCountdown();
+        } else {
+          remainingSeconds.value = 0;
+        }
       } else {
-        currentMessage.value = null;
+        notifications.value = [];
         if (viewMode.value !== 'history') {
           showEmptyState.value = true;
         }
@@ -267,7 +448,20 @@ async function fetchLatestNotification(playSound: boolean = false) {
 (window as any).deskNotifyShowMessage = (msg: NotificationMessage) => {
   viewMode.value = 'current';
   showEmptyState.value = false;
-  showMessage(msg, true);
+  // Prepend new incoming message to notifications list
+  const exists = notifications.value.some((n) => n.id === msg.id);
+  if (!exists) {
+    notifications.value = [msg, ...notifications.value];
+  }
+  if (msg.soundEnabled !== false) {
+    playAlertSound(msg.soundUrl);
+  }
+  if (msg.duration > 0) {
+    remainingSeconds.value = msg.duration;
+    startCountdown();
+  } else {
+    remainingSeconds.value = 0;
+  }
 };
 
 function connectWebSocket() {
@@ -277,10 +471,21 @@ function connectWebSocket() {
   ws.onmessage = (event) => {
     try {
       const msg: NotificationMessage = JSON.parse(event.data);
-      // When a new message comes in, switch back to current message view
       viewMode.value = 'current';
       showEmptyState.value = false;
-      showMessage(msg, true);
+      const exists = notifications.value.some((n) => n.id === msg.id);
+      if (!exists) {
+        notifications.value = [msg, ...notifications.value];
+      }
+      if (msg.soundEnabled !== false) {
+        playAlertSound(msg.soundUrl);
+      }
+      if (msg.duration > 0) {
+        remainingSeconds.value = msg.duration;
+        startCountdown();
+      } else {
+        remainingSeconds.value = 0;
+      }
     } catch (e) {
       console.error('解析推送消息失败', e);
     }
@@ -289,22 +494,6 @@ function connectWebSocket() {
   ws.onclose = () => {
     setTimeout(connectWebSocket, 3000);
   };
-}
-
-function showMessage(msg: NotificationMessage, playSound: boolean = true) {
-  showEmptyState.value = false;
-  currentMessage.value = msg;
-  if (playSound && msg.soundEnabled !== false) {
-    playAlertSound(msg.soundUrl);
-  }
-
-  if (timer) clearInterval(timer);
-  if (msg.duration > 0) {
-    remainingSeconds.value = msg.duration;
-    startCountdown();
-  } else {
-    remainingSeconds.value = 0;
-  }
 }
 
 function startCountdown() {
@@ -317,9 +506,18 @@ function startCountdown() {
   }, 1000);
 }
 
+function minimizeCard() {
+  handleWindowInteraction();
+  if ((window as any).runtime?.WindowMinimise) {
+    (window as any).runtime.WindowMinimise();
+  }
+  fetch('/api/window/minimize', { method: 'POST' }).catch(() => {});
+}
+
 function closeCard() {
+  handleWindowInteraction();
   if (timer) clearInterval(timer);
-  currentMessage.value = null;
+  notifications.value = [];
   showEmptyState.value = false;
   viewMode.value = 'current';
   if ((window as any).runtime?.WindowHide) {
@@ -338,9 +536,30 @@ function playAlertSound(soundUrl?: string) {
   } catch (e) {}
 }
 
-function getDownloadUrl(att: Attachment): string {
-  if (!att.url) return `/api/files/${att.id}?download=1`;
-  return att.url.includes('?') ? `${att.url}&download=1` : `${att.url}?download=1`;
+async function openAttachment(att: Attachment) {
+  try {
+    const res = await fetch(`/api/files/${att.id}/open`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || `状态码 ${res.status}`);
+    }
+  } catch (err: any) {
+    console.error('打开文件失败:', err);
+    alert('打开文件失败：' + (err.message || '系统错误'));
+  }
+}
+
+async function revealAttachment(att: Attachment) {
+  try {
+    const res = await fetch(`/api/files/${att.id}/reveal`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || `状态码 ${res.status}`);
+    }
+  } catch (err: any) {
+    console.error('在文件夹中定位文件失败:', err);
+    alert('在文件夹中定位文件失败：' + (err.message || '系统错误'));
+  }
 }
 
 function formatSize(bytes: number): string {
@@ -349,36 +568,13 @@ function formatSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-function getLevelLabel(level: string): string {
-  switch (level) {
-    case 'urgent': return '紧急通知';
-    case 'important': return '重要通知';
-    default: return '班级通知';
-  }
-}
-
-function getBadgeClass(level: string): string {
-  switch (level) {
-    case 'urgent': return 'bg-red-500 text-white';
-    case 'important': return 'bg-amber-500 text-white';
-    default: return 'bg-blue-600 text-white';
-  }
-}
-
-function getHeaderBgClass(level: string): string {
-  switch (level) {
-    case 'urgent': return 'bg-red-50/50';
-    case 'important': return 'bg-amber-50/50';
-    default: return 'bg-blue-50/30';
-  }
-}
-
-function getCardBorderClass(level: string): string {
-  switch (level) {
-    case 'urgent': return 'ring-2 ring-red-500/30 shadow-red-500/10';
-    case 'important': return 'ring-2 ring-amber-500/30 shadow-amber-500/10';
-    default: return 'ring-1 ring-blue-500/20 shadow-blue-500/5';
-  }
+function formatExactTime(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const hours = d.getHours().toString().padStart(2, '0');
+  const minutes = d.getMinutes().toString().padStart(2, '0');
+  const seconds = d.getSeconds().toString().padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
 }
 </script>
 
@@ -395,5 +591,9 @@ function getCardBorderClass(level: string): string {
 }
 .animate-slide-in {
   animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.drag-header {
+  -webkit-app-region: drag;
 }
 </style>

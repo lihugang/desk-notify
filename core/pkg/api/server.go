@@ -91,14 +91,19 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 	mux.HandleFunc("/api/notify/latest", s.handleLatestNotify)
 	mux.HandleFunc("/api/notify", s.handleNotify)
 	mux.HandleFunc("/api/history", s.handleHistory)
+	mux.HandleFunc("/api/files/open", s.handleFileOpen)
+	mux.HandleFunc("/api/files/reveal", s.handleFileReveal)
 	mux.HandleFunc("/api/files/", s.handleFiles)
 	mux.HandleFunc("/api/sound/current", s.handleCurrentSound)
 	mux.HandleFunc("/alert.mp3", s.handleCurrentSound)
 	mux.HandleFunc("/api/sound/upload", s.handleSoundUpload)
 	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
+	mux.HandleFunc("/api/window/minimize", s.handleWindowMinimize)
+	mux.HandleFunc("/api/window/stop-flash", s.handleWindowStopFlash)
 	mux.HandleFunc("/api/window/settings-hide", s.handleSettingsHide)
 	mux.HandleFunc("/api/window/settings-show", s.handleSettingsShow)
+	mux.HandleFunc("/api/config/lock-admin", s.handleAdminLock)
 	mux.HandleFunc("/api/window/history-hide", s.handleHistoryHide)
 	mux.HandleFunc("/api/window/history-show", s.handleHistoryShow)
 	mux.HandleFunc("/api/archive/open", s.handleOpenArchiveDir)
@@ -221,10 +226,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			frpUrl = fmt.Sprintf("http://%s:%d", cfg.FRP.ServerAddr, cfg.FRP.RemotePort)
 		}
 
+		hasPassword := cfg.GetEffectivePasswordHash() != "" || cfg.PublicPassword != ""
 		safeConfig := map[string]interface{}{
 			"className":         cfg.ClassName,
 			"port":              cfg.Port,
-			"hasPublicPassword": cfg.PublicPasswordHash != "" || cfg.PublicPassword != "",
+			"hasPassword":       hasPassword,
+			"hasPublicPassword": hasPassword,
 			"lanAuthRequired":   cfg.LanAuthRequired,
 			"soundEnabled":      cfg.SoundEnabled,
 			"customSound":       cfg.CustomSound,
@@ -252,6 +259,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			CustomSound       *string           `json:"customSound"`
 			AutoStart         *bool             `json:"autoStart"`
 			LanAuthRequired   *bool             `json:"lanAuthRequired"`
+			NewPassword       *string           `json:"newPassword"`
 			NewPublicPassword *string           `json:"newPublicPassword"`
 			NewAdminPassword  *string           `json:"newAdminPassword"`
 			FRP               *config.FRPConfig `json:"frp"`
@@ -278,9 +286,17 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Level 2: Advanced & FRP & Security Parameters (Requires admin authentication)
+		var newPasswordVal string
+		if req.NewPassword != nil && *req.NewPassword != "" {
+			newPasswordVal = *req.NewPassword
+		} else if req.NewAdminPassword != nil && *req.NewAdminPassword != "" {
+			newPasswordVal = *req.NewAdminPassword
+		} else if req.NewPublicPassword != nil && *req.NewPublicPassword != "" {
+			newPasswordVal = *req.NewPublicPassword
+		}
+
 		frpChanged := false
-		if (req.NewPublicPassword != nil && *req.NewPublicPassword != "") ||
-			(req.NewAdminPassword != nil && *req.NewAdminPassword != "") ||
+		if newPasswordVal != "" ||
 			req.LanAuthRequired != nil ||
 			req.FRP != nil {
 			if !isAdmin {
@@ -292,18 +308,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				cfg.LanAuthRequired = *req.LanAuthRequired
 			}
 
-			if req.NewPublicPassword != nil && *req.NewPublicPassword != "" {
-				hash, err := auth.HashPassword(*req.NewPublicPassword)
+			if newPasswordVal != "" {
+				hash, err := auth.HashPassword(newPasswordVal)
 				if err == nil {
+					cfg.PasswordHash = hash
 					cfg.PublicPasswordHash = hash
-					cfg.PublicPassword = ""
-				}
-			}
-
-			if req.NewAdminPassword != nil && *req.NewAdminPassword != "" {
-				hash, err := auth.HashPassword(*req.NewAdminPassword)
-				if err == nil {
 					cfg.AdminPasswordHash = hash
+					cfg.PublicPassword = ""
 				}
 			}
 
@@ -331,19 +342,43 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if frpChanged {
-			_ = s.tunnel.Stop()
-			_ = s.tunnel.Start(tunnel.Config{
-				Enabled:    cfg.FRP.Enabled,
-				ServerAddr: cfg.FRP.ServerAddr,
-				ServerPort: cfg.FRP.ServerPort,
-				Token:      cfg.FRP.Token,
-				RemotePort: cfg.FRP.RemotePort,
-				LocalPort:  cfg.Port,
-			})
+		// Hot reload tunnel / FRP whenever FRP config or security parameters are saved
+		if frpChanged || (isAdmin && (req.FRP != nil || req.LanAuthRequired != nil || newPasswordVal != "")) {
+			if s.tunnel != nil {
+				_ = s.tunnel.Stop()
+				_ = s.tunnel.Start(tunnel.Config{
+					Enabled:    cfg.FRP.Enabled,
+					ServerAddr: cfg.FRP.ServerAddr,
+					ServerPort: cfg.FRP.ServerPort,
+					Token:      cfg.FRP.Token,
+					RemotePort: cfg.FRP.RemotePort,
+					LocalPort:  cfg.Port,
+				})
+			}
 		}
 
-		w.WriteHeader(http.StatusOK)
+		var respAdminToken string
+		if newPasswordVal != "" {
+			// If unified password changed, generate new admin token so current session stays authenticated
+			if newToken, err := auth.GenerateAdminToken(); err == nil {
+				respAdminToken = newToken
+				http.SetCookie(w, &http.Cookie{
+					Name:     "dn_admin_token",
+					Value:    newToken,
+					Path:     "/",
+					HttpOnly: true,
+					MaxAge:   24 * 3600,
+				})
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":           true,
+			"adminToken":   respAdminToken,
+			"frpStatus":    s.tunnel.Status(),
+			"frpPublicUrl": s.tunnel.PublicURL(),
+		})
 		return
 	}
 
@@ -366,14 +401,15 @@ func (s *Server) handleAdminVerify(w http.ResponseWriter, r *http.Request) {
 
 	cfg := s.cfgMgr.Get()
 	valid := false
-	if cfg.AdminPasswordHash != "" {
-		valid = auth.CheckPassword(cfg.AdminPasswordHash, req.Password)
+	pwdHash := cfg.GetEffectivePasswordHash()
+	if pwdHash != "" {
+		valid = auth.CheckPassword(pwdHash, req.Password)
 	} else {
 		valid = req.Password == "123456"
 	}
 
 	if !valid {
-		http.Error(w, "管理密码错误，请重新输入", http.StatusUnauthorized)
+		http.Error(w, "密码错误，请重新输入", http.StatusUnauthorized)
 		return
 	}
 
@@ -411,8 +447,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	cfg := s.cfgMgr.Get()
 	valid := false
-	if cfg.PublicPasswordHash != "" {
-		valid = auth.CheckPassword(cfg.PublicPasswordHash, req.Password)
+	pwdHash := cfg.GetEffectivePasswordHash()
+	if pwdHash != "" {
+		valid = auth.CheckPassword(pwdHash, req.Password)
 	} else if cfg.PublicPassword != "" {
 		valid = req.Password == cfg.PublicPassword
 	} else {
@@ -420,7 +457,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !valid {
-		http.Error(w, "Invalid password", http.StatusUnauthorized)
+		http.Error(w, "密码错误，请重新输入", http.StatusUnauthorized)
 		return
 	}
 
@@ -449,29 +486,32 @@ func (s *Server) handleLatestNotify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := s.cfgMgr.Get()
-	list, err := s.store.GetRecent(1)
+	list, err := s.store.GetRecentWithinMinutes(90)
 	if err != nil || len(list) == 0 {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"hasNotification": false,
 			"className":       cfg.ClassName,
+			"notifications":   []*db.Notification{},
 		})
 		return
 	}
 
 	n := list[0]
 	type latestResponse struct {
-		HasNotification bool             `json:"hasNotification"`
-		ClassName       string           `json:"className"`
-		Notification    *db.Notification `json:"notification"`
-		SoundEnabled    bool             `json:"soundEnabled"`
-		SoundURL        string           `json:"soundUrl"`
+		HasNotification bool               `json:"hasNotification"`
+		ClassName       string             `json:"className"`
+		Notification    *db.Notification   `json:"notification"`
+		Notifications   []*db.Notification `json:"notifications"`
+		SoundEnabled    bool               `json:"soundEnabled"`
+		SoundURL        string             `json:"soundUrl"`
 	}
 
 	resp := latestResponse{
 		HasNotification: true,
 		ClassName:       cfg.ClassName,
 		Notification:    n,
+		Notifications:   list,
 		SoundEnabled:    cfg.SoundEnabled,
 		SoundURL:        fmt.Sprintf("/api/sound/current?t=%d", time.Now().UnixMilli()),
 	}
@@ -499,11 +539,12 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	content := r.FormValue("content")
-	level := r.FormValue("level")
-	if level == "" {
-		level = "info"
+	pinnedStr := r.FormValue("pinned")
+	pinned := true
+	if pinnedStr == "false" || pinnedStr == "0" {
+		pinned = false
 	}
-	// 弹窗卡片常驻置顶，需手动点击关闭 (duration = 0)
+	// 弹窗卡片常驻，需手动点击关闭 (duration = 0)
 	duration := 0
 
 	notifyID := uuid.New().String()
@@ -566,7 +607,7 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	n := &db.Notification{
 		ID:        notifyID,
 		Content:   content,
-		Level:     level,
+		Pinned:    pinned,
 		Duration:  duration,
 		Sender:    r.RemoteAddr,
 		CreatedAt: time.Now(),
@@ -607,6 +648,20 @@ func (s *Server) handleWindowHide(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWindowShow(w http.ResponseWriter, r *http.Request) {
 	if s.desktop != nil {
 		s.desktop.ShowCard()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleWindowMinimize(w http.ResponseWriter, r *http.Request) {
+	if s.desktop != nil {
+		s.desktop.MinimizeCard()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleWindowStopFlash(w http.ResponseWriter, r *http.Request) {
+	if s.desktop != nil {
+		s.desktop.StopFlash()
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -661,6 +716,18 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/open") {
+		attID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/files/"), "/open")
+		s.processFileOpen(w, r, attID)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/reveal") || strings.HasSuffix(r.URL.Path, "/locate") {
+		attID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/files/"), "/reveal")
+		attID = strings.TrimSuffix(attID, "/locate")
+		s.processFileReveal(w, r, attID)
+		return
+	}
+
 	attID := strings.TrimPrefix(r.URL.Path, "/api/files/")
 	if attID == "" {
 		http.NotFound(w, r)
@@ -691,6 +758,184 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	encodedName := url.PathEscape(att.Name)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename=%q; filename*=UTF-8''%s`, disposition, att.Name, encodedName))
 	_, _ = io.Copy(w, f)
+}
+
+type fileActionReq struct {
+	ID string `json:"id"`
+}
+
+func (s *Server) handleFileOpen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg := s.cfgMgr.Get()
+	if !auth.CheckAuth(r, cfg) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" && r.Body != nil {
+		var req fileActionReq
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		id = req.ID
+	}
+	if id == "" {
+		http.Error(w, "Missing file ID", http.StatusBadRequest)
+		return
+	}
+	s.processFileOpen(w, r, id)
+}
+
+func (s *Server) handleFileReveal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg := s.cfgMgr.Get()
+	if !auth.CheckAuth(r, cfg) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" && r.Body != nil {
+		var req fileActionReq
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		id = req.ID
+	}
+	if id == "" {
+		http.Error(w, "Missing file ID", http.StatusBadRequest)
+		return
+	}
+	s.processFileReveal(w, r, id)
+}
+
+func (s *Server) resolveAttachmentDocPath(att *db.Attachment) (string, error) {
+	if att.DocPath != "" {
+		if _, err := os.Stat(att.DocPath); err == nil {
+			return att.DocPath, nil
+		}
+	}
+
+	// If DocPath doesn't exist, but LocalPath exists, mirror it to DocPath
+	if att.LocalPath != "" {
+		if _, err := os.Stat(att.LocalPath); err == nil {
+			dest := att.DocPath
+			if dest == "" {
+				cfg := s.cfgMgr.Get()
+				docBase := config.GetDocumentsDir(cfg.ClassName)
+				dateDir := time.Now().Format("2006-01-02")
+				docTargetDir := filepath.Join(docBase, dateDir)
+				_ = os.MkdirAll(docTargetDir, 0755)
+				dest = filepath.Join(docTargetDir, att.Name)
+			} else {
+				_ = os.MkdirAll(filepath.Dir(dest), 0755)
+			}
+
+			// Try link or copy
+			if err := os.Link(att.LocalPath, dest); err != nil {
+				_ = storage.CopyFile(att.LocalPath, dest)
+			}
+			if _, err := os.Stat(dest); err == nil {
+				return dest, nil
+			}
+			return att.LocalPath, nil
+		}
+	}
+
+	if att.DocPath != "" {
+		return att.DocPath, nil
+	}
+	return "", fmt.Errorf("文件在磁盘上不存在")
+}
+
+func (s *Server) processFileOpen(w http.ResponseWriter, r *http.Request, attID string) {
+	cfg := s.cfgMgr.Get()
+	if !auth.CheckAuth(r, cfg) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	att, err := s.store.GetAttachment(attID)
+	if err != nil || att == nil {
+		http.Error(w, "附件不存在", http.StatusNotFound)
+		return
+	}
+
+	targetPath, err := s.resolveAttachmentDocPath(att)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("无法定位文件: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var openErr error
+	if s.desktop != nil {
+		openErr = s.desktop.OpenFile(targetPath)
+	} else {
+		openErr = desktop.OpenFile(targetPath)
+	}
+
+	if openErr != nil {
+		http.Error(w, fmt.Sprintf("打开文件失败: %v", openErr), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":   true,
+		"path": targetPath,
+	})
+}
+
+func (s *Server) processFileReveal(w http.ResponseWriter, r *http.Request, attID string) {
+	cfg := s.cfgMgr.Get()
+	if !auth.CheckAuth(r, cfg) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	att, err := s.store.GetAttachment(attID)
+	if err != nil || att == nil {
+		http.Error(w, "附件不存在", http.StatusNotFound)
+		return
+	}
+
+	targetPath, err := s.resolveAttachmentDocPath(att)
+	if err != nil {
+		// Fallback to opening the archive directory
+		docDir := config.GetDocumentsDir(cfg.ClassName)
+		if s.desktop != nil {
+			_ = s.desktop.OpenArchiveDir()
+		} else {
+			_ = desktop.RevealFile(docDir)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":   true,
+			"path": docDir,
+		})
+		return
+	}
+
+	var revealErr error
+	if s.desktop != nil {
+		revealErr = s.desktop.RevealFile(targetPath)
+	} else {
+		revealErr = desktop.RevealFile(targetPath)
+	}
+
+	if revealErr != nil {
+		http.Error(w, fmt.Sprintf("定位文件失败: %v", revealErr), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":   true,
+		"path": targetPath,
+	})
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -889,7 +1134,28 @@ func (s *Server) handleSettingsHide(w http.ResponseWriter, r *http.Request) {
 		s.desktop.HideSettings()
 	}
 	_ = s.cfgMgr.MarkFirstRunComplete()
+	http.SetCookie(w, &http.Cookie{
+		Name:     "dn_admin_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleAdminLock(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "dn_admin_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }
 
 func (s *Server) handleSettingsShow(w http.ResponseWriter, r *http.Request) {

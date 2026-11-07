@@ -13,15 +13,14 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- Level Filter -->
+        <!-- Filter -->
         <select
-          v-model="selectedLevel"
+          v-model="selectedFilter"
           class="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          <option value="all">全部级别</option>
-          <option value="urgent">紧急提醒</option>
-          <option value="important">重要通知</option>
-          <option value="info">普通通知</option>
+          <option value="all">全部通知</option>
+          <option value="pinned">置顶通知</option>
+          <option value="unpinned">常规通知</option>
         </select>
 
         <!-- Refresh Button -->
@@ -59,12 +58,16 @@
         <div class="flex items-center justify-between text-xs border-b border-slate-100 pb-2.5">
           <div class="flex items-center gap-2">
             <span
-              class="px-2.5 py-0.5 rounded-full font-semibold text-[11px] shadow-2xs"
-              :class="getLevelBadge(item.level)"
+              class="px-2.5 py-0.5 rounded-full font-semibold text-[11px] shadow-2xs flex items-center gap-1"
+              :class="item.pinned ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-50 text-slate-700 border border-slate-200'"
             >
-              {{ getLevelLabel(item.level) }}
+              <Pin v-if="item.pinned" class="w-3 h-3 text-amber-600" />
+              <span>{{ item.pinned ? '置顶显示' : '常规通知' }}</span>
             </span>
-            <span class="text-slate-500 font-medium">{{ formatTime(item.createdAt) }}</span>
+            <span class="text-slate-600 font-mono text-[11px] font-medium flex items-center gap-1 bg-slate-50 border border-slate-200/80 px-2.5 py-0.5 rounded-md">
+              <Clock class="w-3 h-3 text-slate-400" />
+              <span>{{ formatTime(item.createdAt) }}</span>
+            </span>
           </div>
 
           <div class="flex items-center gap-2 text-slate-400 text-[11px]">
@@ -116,21 +119,19 @@
           </div>
         </div>
 
-        <!-- Attachments List with Direct Download -->
+        <!-- Attachments List -->
         <div v-if="item.attachments && item.attachments.length > 0" class="pt-1">
           <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
             <Paperclip class="w-3.5 h-3.5 text-blue-500" />
-            <span>课件与附件 ({{ item.attachments.length }}个 · 点击直接下载)</span>
+            <span>课件与附件 ({{ item.attachments.length }}个)</span>
           </p>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <a
+            <div
               v-for="att in item.attachments"
               :key="att.id"
-              :href="getDownloadUrl(att)"
-              :download="att.name"
-              target="_blank"
-              class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-blue-50/70 border border-slate-200 hover:border-blue-200 text-xs transition group"
-              title="点击下载附件"
+              class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-blue-50/50 border border-slate-200 hover:border-blue-200 text-xs transition group select-none cursor-pointer"
+              @click="openAttachment(att)"
+              :title="'点击直接打开：' + att.name"
             >
               <div class="flex items-center space-x-2.5 truncate min-w-0 pr-2">
                 <div class="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
@@ -141,12 +142,25 @@
                   <p class="text-[11px] text-slate-400">{{ formatSize(att.size) }}</p>
                 </div>
               </div>
-              <div class="flex items-center gap-1 flex-shrink-0">
-                <span class="p-1.5 rounded-lg bg-white group-hover:bg-blue-600 text-slate-400 group-hover:text-white border border-slate-200 group-hover:border-blue-600 shadow-2xs transition">
-                  <Download class="w-3.5 h-3.5" />
-                </span>
+              <div class="flex items-center gap-1 flex-shrink-0" @click.stop>
+                <button
+                  type="button"
+                  @click="revealAttachment(att)"
+                  class="p-1.5 rounded-lg bg-white hover:bg-blue-600 text-slate-500 hover:text-white border border-slate-200 hover:border-blue-600 shadow-2xs transition cursor-pointer"
+                  title="在文件夹中打开并选择此文件"
+                >
+                  <Folder class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  @click="openAttachment(att)"
+                  class="p-1.5 rounded-lg bg-white hover:bg-blue-600 text-slate-500 hover:text-white border border-slate-200 hover:border-blue-600 shadow-2xs transition cursor-pointer"
+                  title="直接打开此文件"
+                >
+                  <ExternalLink class="w-3.5 h-3.5" />
+                </button>
               </div>
-            </a>
+            </div>
           </div>
         </div>
       </article>
@@ -180,7 +194,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
   History, RefreshCw, Inbox, ImageIcon, Paperclip,
-  FileText, Download, ZoomIn, Loader2, CheckCircle2
+  FileText, Folder, ExternalLink, ZoomIn, Loader2, CheckCircle2, Pin, Clock
 } from 'lucide-vue-next';
 import { marked } from 'marked';
 import type { NotificationMessage, Attachment } from '../types';
@@ -197,17 +211,20 @@ const total = ref(0);
 const loading = ref(false);
 const loadingMore = ref(false);
 const hasMore = ref(true);
-const selectedLevel = ref<'all' | 'info' | 'important' | 'urgent'>('all');
+const selectedFilter = ref<'all' | 'pinned' | 'unpinned'>('all');
 const activeLightboxImage = ref<string | null>(null);
 
 const sentinelRef = ref<HTMLDivElement | null>(null);
 let observer: IntersectionObserver | null = null;
 
 const filteredItems = computed(() => {
-  if (selectedLevel.value === 'all') {
+  if (selectedFilter.value === 'all') {
     return items.value;
   }
-  return items.value.filter(it => it.level === selectedLevel.value);
+  if (selectedFilter.value === 'pinned') {
+    return items.value.filter(it => it.pinned);
+  }
+  return items.value.filter(it => !it.pinned);
 });
 
 onMounted(() => {
@@ -319,11 +336,30 @@ function openLightbox(url: string) {
   activeLightboxImage.value = url;
 }
 
-function getDownloadUrl(att: Attachment): string {
-  if (!att.url) {
-    return `/api/files/${att.id}?download=1`;
+async function openAttachment(att: Attachment) {
+  try {
+    const res = await fetch(`/api/files/${att.id}/open`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || `状态码 ${res.status}`);
+    }
+  } catch (err: any) {
+    console.error('打开文件失败:', err);
+    alert('打开文件失败：' + (err.message || '系统错误'));
   }
-  return att.url.includes('?') ? `${att.url}&download=1` : `${att.url}?download=1`;
+}
+
+async function revealAttachment(att: Attachment) {
+  try {
+    const res = await fetch(`/api/files/${att.id}/reveal`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || `状态码 ${res.status}`);
+    }
+  } catch (err: any) {
+    console.error('在文件夹中定位文件失败:', err);
+    alert('在文件夹中定位文件失败：' + (err.message || '系统错误'));
+  }
 }
 
 function formatSize(bytes: number): string {
@@ -336,36 +372,12 @@ function formatSize(bytes: number): string {
 function formatTime(iso: string): string {
   if (!iso) return '';
   const d = new Date(iso);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const day = d.getDate().toString().padStart(2, '0');
   const hours = d.getHours().toString().padStart(2, '0');
   const minutes = d.getMinutes().toString().padStart(2, '0');
-
-  if (isToday) {
-    return `今天 ${hours}:${minutes}`;
-  }
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  if (d.getFullYear() === now.getFullYear()) {
-    return `${month}月${day}日 ${hours}:${minutes}`;
-  }
-  return `${d.getFullYear()}年${month}月${day}日 ${hours}:${minutes}`;
-}
-
-function getLevelBadge(level: string): string {
-  switch (level) {
-    case 'urgent': return 'bg-red-50 text-red-700 border border-red-200';
-    case 'important': return 'bg-amber-50 text-amber-700 border border-amber-200';
-    default: return 'bg-blue-50 text-blue-700 border border-blue-200';
-  }
-}
-
-function getLevelLabel(level: string): string {
-  switch (level) {
-    case 'urgent': return '紧急提醒';
-    case 'important': return '重要通知';
-    default: return '普通通知';
-  }
+  const seconds = d.getSeconds().toString().padStart(2, '0');
+  return `${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
 defineExpose({

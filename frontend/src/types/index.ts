@@ -4,6 +4,8 @@ export interface Attachment {
   size: number;
   type: string;
   url: string;
+  docPath?: string;
+  localPath?: string;
 }
 
 export interface NotificationMessage {
@@ -11,7 +13,7 @@ export interface NotificationMessage {
   content: string; // Markdown content
   images: string[]; // Image URLs
   attachments: Attachment[]; // File attachments
-  level: 'info' | 'important' | 'urgent';
+  pinned: boolean; // 置顶显示 (true) 或 后台默默打开并闪烁任务栏 (false)
   duration: number; // In seconds, 0 = manual close
   sender?: string;
   createdAt: string;
@@ -22,6 +24,9 @@ export interface NotificationMessage {
 export interface AppConfig {
   className: string;
   port?: number;
+  password?: string;
+  hasPassword?: boolean;
+  newPassword?: string;
   publicPassword?: string;
   hasPublicPassword?: boolean;
   newPublicPassword?: string;

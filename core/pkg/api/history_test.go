@@ -49,7 +49,7 @@ func TestHistoryPaginationAndDownload(t *testing.T) {
 		notif := &db.Notification{
 			ID:        fmt.Sprintf("notif_%d", i),
 			Content:   fmt.Sprintf("## 历史通知 %d\n这是第 %d 条完整的测试通知内容", i, i),
-			Level:     "info",
+			Pinned:    i%2 == 0,
 			Duration:  30,
 			Sender:    "张老师",
 			CreatedAt: time.Now().Add(time.Duration(i) * time.Minute),

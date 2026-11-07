@@ -9,12 +9,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
+	"unsafe"
 
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
+	"github.com/wailsapp/wails/v3/pkg/w32"
 )
 
 type windowsManager struct {
@@ -25,6 +28,7 @@ type windowsManager struct {
 	settingsWindow     *application.WebviewWindow
 	historyWindow      *application.WebviewWindow
 	pendingOpenHistory bool
+	cardMoved          bool
 	cfgMgr             *config.Manager
 }
 
@@ -54,27 +58,59 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 		},
 	})
 
+	// Calculate default window dimensions and position:
+	// - Height: ~70% of screen height
+	// - Width: 680 (fixed width; locks left/right from drag resize)
+	// - Position: Top 10% of screen, horizontally centered
+	cardWidth := 680
+	cardHeight := 540
+	cardX := 0
+	cardY := 0
+	primaryScreen := m.app.Screen.GetPrimary()
+	if primaryScreen != nil {
+		cardHeight = int(float64(primaryScreen.WorkArea.Height) * 0.70)
+		cardX = primaryScreen.WorkArea.X + (primaryScreen.WorkArea.Width-cardWidth)/2
+		cardY = primaryScreen.WorkArea.Y + int(float64(primaryScreen.WorkArea.Height)*0.10)
+	}
+
 	// Create frameless floating card window (alwaysOnTop, transparent background)
+	// MinWidth == MaxWidth == 680 prevents left/right border drag resize,
+	// while DisableResize: false and MinHeight/MaxHeight allow top/bottom border drag resize.
 	m.cardWindow = m.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "card-window",
 		Title:            "DeskNotify 桌面通知",
-		Width:            680,
-		Height:           540,
+		Width:            cardWidth,
+		Height:           cardHeight,
+		MinWidth:         cardWidth,
+		MaxWidth:         cardWidth,
+		MinHeight:        220,
+		MaxHeight:        1400,
+		X:                cardX,
+		Y:                cardY,
 		AlwaysOnTop:      true,
 		Frameless:        true,
 		BackgroundType:   application.BackgroundTypeTransparent,
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		URL:              fmt.Sprintf("http://localhost:%d/card", cfg.Port),
 		Hidden:           true,
-		DisableResize:    true,
+		DisableResize:    false,
 		Windows: application.WindowsWindow{
 			DisableFramelessWindowDecorations: true,
+			NonClientRegionSupport:            true,
 		},
 	})
-	m.cardWindow.Center()
+	if primaryScreen == nil {
+		m.cardWindow.Center()
+	}
 	m.cardWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		event.Cancel()
-		m.cardWindow.Hide()
+		m.HideCard()
+	})
+	m.cardWindow.OnWindowEvent(events.Common.WindowFocus, func(event *application.WindowEvent) {
+		m.StopFlash()
+	})
+	m.cardWindow.OnWindowEvent(events.Common.WindowDidMove, func(event *application.WindowEvent) {
+		m.cardMoved = true
 	})
 
 	isFirstRun := cfgMgr.IsFirstRun()
@@ -91,7 +127,7 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	m.settingsWindow.Center()
 	m.settingsWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		event.Cancel()
-		m.settingsWindow.Hide()
+		m.HideSettings()
 		_ = m.cfgMgr.MarkFirstRunComplete()
 	})
 
@@ -170,7 +206,7 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 
 	tray.SetMenu(menu)
 	tray.OnClick(func() {
-		if m.cardWindow.IsVisible() {
+		if m.cardWindow.IsVisible() && !m.cardWindow.IsMinimised() {
 			m.HideCard()
 		} else {
 			m.ShowCard()
@@ -188,8 +224,14 @@ func (m *windowsManager) Notify(n *db.Notification) {
 		return
 	}
 
-	// 1. Pop up card window, center and bring to top FIRST and RELIABLY
-	m.ShowCard()
+	// 1. Show card window according to Pinned flag:
+	// Pinned: Pop up on top, grab focus, allow minimize and close
+	// Unpinned: Silently open in background without stealing focus, flash taskbar until clicked
+	if n.Pinned {
+		m.ShowCardPinned()
+	} else {
+		m.ShowCardBackground()
+	}
 
 	// 2. Direct JS push into card window so it updates immediately without relying solely on WebSocket
 	if m.cardWindow != nil {
@@ -205,14 +247,10 @@ func (m *windowsManager) Notify(n *db.Notification) {
 				_ = recover()
 			}()
 			cfg := m.cfgMgr.Get()
-			levelText := "班级通知"
-			switch n.Level {
-			case "urgent":
-				levelText = "【紧急提醒】"
-			case "important":
-				levelText = "【重要通知】"
+			title := fmt.Sprintf("%s · 班级通知", cfg.ClassName)
+			if n.Pinned {
+				title = fmt.Sprintf("%s · 【置顶通知】", cfg.ClassName)
 			}
-			title := fmt.Sprintf("%s · %s", cfg.ClassName, levelText)
 			body := n.Content
 			if len(body) > 120 {
 				body = body[:120] + "..."
@@ -227,24 +265,106 @@ func (m *windowsManager) Notify(n *db.Notification) {
 	}
 }
 
+func (m *windowsManager) positionCardWindowDefault() {
+	if m.cardWindow == nil || m.app == nil {
+		return
+	}
+	cardWidth := 680
+	primaryScreen := m.app.Screen.GetPrimary()
+	if primaryScreen != nil {
+		cardHeight := int(float64(primaryScreen.WorkArea.Height) * 0.70)
+		cardX := primaryScreen.WorkArea.X + (primaryScreen.WorkArea.Width-cardWidth)/2
+		cardY := primaryScreen.WorkArea.Y + int(float64(primaryScreen.WorkArea.Height)*0.10)
+		m.cardWindow.SetSize(cardWidth, cardHeight)
+		m.cardWindow.SetPosition(cardX, cardY)
+	} else {
+		m.cardWindow.Center()
+	}
+}
+
+func (m *windowsManager) ShowCardPinned() {
+	if m.cardWindow != nil {
+		m.StopFlash()
+		if m.cardWindow.IsMinimised() {
+			m.cardWindow.UnMinimise()
+		}
+		if !m.cardMoved {
+			m.positionCardWindowDefault()
+		}
+		m.cardWindow.SetAlwaysOnTop(true)
+		m.cardWindow.Show()
+		m.cardWindow.Focus()
+		hwnd := w32.HWND(uintptr(m.cardWindow.NativeWindow()))
+		if hwnd != 0 {
+			w32.SetForegroundWindow(hwnd)
+		}
+		m.cardWindow.ExecJS("if (window.deskNotifyShowLatest) { window.deskNotifyShowLatest(); }")
+	}
+}
+
+func (m *windowsManager) ShowCardBackground() {
+	if m.cardWindow != nil {
+		prevWnd := w32.GetForegroundWindow()
+		m.cardWindow.SetAlwaysOnTop(false)
+		if !m.cardMoved {
+			m.positionCardWindowDefault()
+		}
+		m.cardWindow.Show()
+		hwnd := w32.HWND(uintptr(m.cardWindow.NativeWindow()))
+		if hwnd != 0 {
+			w32.ShowWindow(hwnd, w32.SW_SHOWNOACTIVATE)
+			w32.SetWindowPos(hwnd, w32.HWND_NOTOPMOST, 0, 0, 0, 0, uint(w32.SWP_NOMOVE|w32.SWP_NOSIZE|w32.SWP_NOACTIVATE))
+			if prevWnd != 0 && prevWnd != hwnd {
+				w32.SetForegroundWindow(prevWnd)
+			}
+		}
+		m.cardWindow.Flash(true)
+		m.cardWindow.ExecJS("if (window.deskNotifyShowLatest) { window.deskNotifyShowLatest(); }")
+	}
+}
+
 func (m *windowsManager) ShowCard() {
 	if m.cardWindow != nil {
+		m.StopFlash()
+		if m.cardWindow.IsMinimised() {
+			m.cardWindow.UnMinimise()
+		}
+		if !m.cardMoved {
+			m.positionCardWindowDefault()
+		}
 		m.cardWindow.Show()
-		m.cardWindow.Center()
 		m.cardWindow.Focus()
-		m.cardWindow.SetAlwaysOnTop(true)
+		hwnd := w32.HWND(uintptr(m.cardWindow.NativeWindow()))
+		if hwnd != 0 {
+			w32.SetForegroundWindow(hwnd)
+		}
 		m.cardWindow.ExecJS("if (window.deskNotifyShowLatest) { window.deskNotifyShowLatest(); }")
 	}
 }
 
 func (m *windowsManager) HideCard() {
 	if m.cardWindow != nil {
+		m.StopFlash()
 		m.cardWindow.Hide()
+	}
+}
+
+func (m *windowsManager) MinimizeCard() {
+	if m.cardWindow != nil {
+		m.StopFlash()
+		m.cardWindow.Minimise()
+	}
+}
+
+func (m *windowsManager) StopFlash() {
+	if m.cardWindow != nil {
+		m.cardWindow.Flash(false)
 	}
 }
 
 func (m *windowsManager) OpenSettings() {
 	if m.settingsWindow != nil {
+		m.settingsWindow.ExecJS("if (window.__dnRelockAdmin) { window.__dnRelockAdmin(); }")
 		m.settingsWindow.Show()
 		m.settingsWindow.Center()
 		m.settingsWindow.Focus()
@@ -253,6 +373,7 @@ func (m *windowsManager) OpenSettings() {
 
 func (m *windowsManager) HideSettings() {
 	if m.settingsWindow != nil {
+		m.settingsWindow.ExecJS("if (window.__dnRelockAdmin) { window.__dnRelockAdmin(); }")
 		m.settingsWindow.Hide()
 	}
 }
@@ -291,10 +412,87 @@ func (m *windowsManager) OpenArchiveDir() error {
 	return openDirectory(docDir)
 }
 
+func (m *windowsManager) OpenFile(filePath string) error {
+	return openFile(filePath)
+}
+
+func (m *windowsManager) RevealFile(filePath string) error {
+	return revealFile(filePath)
+}
+
 func (m *windowsManager) Quit() {
 	if m.app != nil {
 		m.app.Quit()
 	}
+}
+
+func openFile(filePath string) error {
+	cleanPath := filepath.Clean(filePath)
+	if _, err := os.Stat(cleanPath); err != nil {
+		return fmt.Errorf("file not found: %w", err)
+	}
+
+	verbPtr, _ := syscall.UTF16PtrFromString("open")
+	filePtr, _ := syscall.UTF16PtrFromString(cleanPath)
+	shell32 := syscall.NewLazyDLL("shell32.dll")
+	shellExecute := shell32.NewProc("ShellExecuteW")
+
+	ret, _, _ := shellExecute.Call(
+		0,
+		uintptr(unsafe.Pointer(verbPtr)),
+		uintptr(unsafe.Pointer(filePtr)),
+		0,
+		0,
+		1, // SW_SHOWNORMAL
+	)
+	if ret <= 32 {
+		cmd := exec.Command("cmd.exe")
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			HideWindow: true,
+			CmdLine:    fmt.Sprintf(`cmd.exe /c start "" "%s"`, cleanPath),
+		}
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to open file %s: %w", cleanPath, err)
+		}
+		go cmd.Wait() //nolint:errcheck
+	}
+	return nil
+}
+
+func revealFile(filePath string) error {
+	cleanPath := filepath.Clean(filePath)
+	if fi, err := os.Stat(cleanPath); err != nil {
+		dir := filepath.Dir(cleanPath)
+		if dirErr := openDirectory(dir); dirErr != nil {
+			return fmt.Errorf("file not found: %w", err)
+		}
+		return nil
+	} else if fi.IsDir() {
+		return openDirectory(cleanPath)
+	}
+
+	explorerPath, err := exec.LookPath("explorer.exe")
+	if err != nil {
+		winDir := os.Getenv("SystemRoot")
+		if winDir == "" {
+			winDir = os.Getenv("WINDIR")
+		}
+		if winDir != "" {
+			explorerPath = filepath.Join(winDir, "explorer.exe")
+		} else {
+			explorerPath = `C:\Windows\explorer.exe`
+		}
+	}
+
+	cmd := exec.Command(explorerPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CmdLine: fmt.Sprintf(`"%s" /select,"%s"`, explorerPath, cleanPath),
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to reveal file %s: %w", cleanPath, err)
+	}
+	go cmd.Wait() //nolint:errcheck
+	return nil
 }
 
 func openDirectory(dir string) error {

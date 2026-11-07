@@ -66,6 +66,10 @@ func (s *Storage) SaveFile(notifyID, filename string, r io.Reader, className str
 	return localPath, docPath, nil
 }
 
+func CopyFile(src, dst string) error {
+	return copyFile(src, dst)
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {

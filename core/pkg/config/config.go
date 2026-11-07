@@ -25,6 +25,7 @@ type FRPConfig struct {
 type AppConfig struct {
 	ClassName          string    `json:"className"`
 	Port               int       `json:"port"`
+	PasswordHash       string    `json:"passwordHash,omitempty"`
 	PublicPassword     string    `json:"publicPassword,omitempty"`
 	PublicPasswordHash string    `json:"publicPasswordHash,omitempty"`
 	AdminPasswordHash  string    `json:"adminPasswordHash,omitempty"`
@@ -44,6 +45,20 @@ type Manager struct {
 	isFirstRun bool
 }
 
+// GetEffectivePasswordHash returns the unified password hash.
+func (c *AppConfig) GetEffectivePasswordHash() string {
+	if c.PasswordHash != "" {
+		return c.PasswordHash
+	}
+	if c.AdminPasswordHash != "" {
+		return c.AdminPasswordHash
+	}
+	if c.PublicPasswordHash != "" {
+		return c.PublicPasswordHash
+	}
+	return ""
+}
+
 func hashBcrypt(password string) string {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -58,12 +73,14 @@ func generateRandomFRPPort() int {
 }
 
 func DefaultConfig() AppConfig {
+	defaultHash := hashBcrypt("123456")
 	return AppConfig{
 		ClassName:          "2907",
 		Port:               8920,
+		PasswordHash:       defaultHash,
 		PublicPassword:     "",
-		PublicPasswordHash: hashBcrypt("123456"),
-		AdminPasswordHash:  hashBcrypt("123456"),
+		PublicPasswordHash: defaultHash,
+		AdminPasswordHash:  defaultHash,
 		LanAuthRequired:    false,
 		SoundEnabled:       true,
 		CustomSound:        "",
@@ -163,19 +180,28 @@ func NewManagerWithDir(dataDir string) (*Manager, error) {
 			mgr.cfg.FRP.RemotePort = generateRandomFRPPort()
 			modified = true
 		}
-		if mgr.cfg.AdminPasswordHash == "" {
-			mgr.cfg.AdminPasswordHash = hashBcrypt("123456")
-			modified = true
-		}
-		if mgr.cfg.PublicPasswordHash == "" {
-			if mgr.cfg.PublicPassword != "" {
-				mgr.cfg.PublicPasswordHash = hashBcrypt(mgr.cfg.PublicPassword)
-				mgr.cfg.PublicPassword = ""
+		// Unify password configuration
+		if mgr.cfg.PasswordHash == "" {
+			if mgr.cfg.AdminPasswordHash != "" {
+				mgr.cfg.PasswordHash = mgr.cfg.AdminPasswordHash
+			} else if mgr.cfg.PublicPasswordHash != "" {
+				mgr.cfg.PasswordHash = mgr.cfg.PublicPasswordHash
+			} else if mgr.cfg.PublicPassword != "" {
+				mgr.cfg.PasswordHash = hashBcrypt(mgr.cfg.PublicPassword)
 			} else {
-				mgr.cfg.PublicPasswordHash = hashBcrypt("123456")
+				mgr.cfg.PasswordHash = hashBcrypt("123456")
 			}
 			modified = true
-		} else if mgr.cfg.PublicPassword != "" {
+		}
+		if mgr.cfg.AdminPasswordHash != mgr.cfg.PasswordHash {
+			mgr.cfg.AdminPasswordHash = mgr.cfg.PasswordHash
+			modified = true
+		}
+		if mgr.cfg.PublicPasswordHash != mgr.cfg.PasswordHash {
+			mgr.cfg.PublicPasswordHash = mgr.cfg.PasswordHash
+			modified = true
+		}
+		if mgr.cfg.PublicPassword != "" {
 			mgr.cfg.PublicPassword = ""
 			modified = true
 		}

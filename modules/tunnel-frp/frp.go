@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/fatedier/frp/client"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
@@ -15,6 +16,7 @@ type FRPTunnel struct {
 	cfg    tunnel.Config
 	status string
 	cancel context.CancelFunc
+	svr    *client.Service
 }
 
 func NewFRPTunnel() *FRPTunnel {
@@ -27,6 +29,16 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	// Stop previous running instance if any
+	if f.cancel != nil {
+		f.cancel()
+		f.cancel = nil
+	}
+	if f.svr != nil {
+		f.svr.Close()
+		f.svr = nil
+	}
+
 	if !cfg.Enabled {
 		f.status = "disabled"
 		return nil
@@ -37,17 +49,15 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 		return fmt.Errorf("invalid frp configuration")
 	}
 
-	if f.cancel != nil {
-		f.cancel()
-		f.cancel = nil
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	f.cancel = cancel
 	f.cfg = cfg
 	f.status = "connecting"
 
 	go func() {
+		// Wait a small delay if restarting to let TCP socket release cleanly
+		time.Sleep(100 * time.Millisecond)
+
 		clientCfg := v1.ClientCommonConfig{}
 		clientCfg.ServerAddr = cfg.ServerAddr
 		clientCfg.ServerPort = cfg.ServerPort
@@ -79,6 +89,7 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 		}
 
 		f.mu.Lock()
+		f.svr = svr
 		f.status = "connected"
 		f.mu.Unlock()
 		fmt.Printf("[DeskNotify FRP] 穿透服务启动中: 远程端口 %d -> 本地端口 %d (服务器: %s:%d)\n",
@@ -107,6 +118,10 @@ func (f *FRPTunnel) Stop() error {
 	if f.cancel != nil {
 		f.cancel()
 		f.cancel = nil
+	}
+	if f.svr != nil {
+		f.svr.Close()
+		f.svr = nil
 	}
 	f.status = "disconnected"
 	return nil

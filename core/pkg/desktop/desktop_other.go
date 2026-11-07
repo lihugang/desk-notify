@@ -40,8 +40,12 @@ func (m *headlessManager) Run(cfgMgr *config.Manager) error {
 }
 
 func (m *headlessManager) Notify(n *db.Notification) {
-	fmt.Printf("[DeskNotify 系统通知] 级别: %s, 内容: %.60s...\n", n.Level, n.Content)
-	fmt.Printf("[DeskNotify 桌面弹窗] 窗口已弹出 (测试环境请在浏览器中打开 /card 查看)\n")
+	pinnedText := "后台静默 (任务栏闪烁)"
+	if n.Pinned {
+		pinnedText = "置顶强提醒 (抢走焦点)"
+	}
+	fmt.Printf("[DeskNotify 系统通知] 模式: %s, 内容: %.60s...\n", pinnedText, n.Content)
+	fmt.Printf("[DeskNotify 桌面弹窗] 窗口已打开 (测试环境请在浏览器中打开 /card 查看)\n")
 }
 
 func (m *headlessManager) ShowCard() {
@@ -50,6 +54,14 @@ func (m *headlessManager) ShowCard() {
 
 func (m *headlessManager) HideCard() {
 	fmt.Println("[DeskNotify 桌面弹窗] 隐藏卡片窗口")
+}
+
+func (m *headlessManager) MinimizeCard() {
+	fmt.Println("[DeskNotify 桌面弹窗] 最小化卡片窗口")
+}
+
+func (m *headlessManager) StopFlash() {
+	fmt.Println("[DeskNotify 桌面弹窗] 停止任务栏闪烁")
 }
 
 func (m *headlessManager) OpenSettings() {
@@ -86,11 +98,55 @@ func (m *headlessManager) OpenArchiveDir() error {
 	return openDirectory(docDir)
 }
 
+func (m *headlessManager) OpenFile(filePath string) error {
+	return openFile(filePath)
+}
+
+func (m *headlessManager) RevealFile(filePath string) error {
+	return revealFile(filePath)
+}
+
 func (m *headlessManager) Quit() {
 	select {
 	case m.sigChan <- syscall.SIGTERM:
 	default:
 	}
+}
+
+func openFile(filePath string) error {
+	cleanPath := filepath.Clean(filePath)
+	if _, err := os.Stat(cleanPath); err != nil {
+		return fmt.Errorf("file not found: %w", err)
+	}
+	var cmd *exec.Cmd
+	if runtime.GOOS == "darwin" {
+		cmd = exec.Command("open", cleanPath)
+	} else {
+		cmd = exec.Command("xdg-open", cleanPath)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	go cmd.Wait() //nolint:errcheck
+	return nil
+}
+
+func revealFile(filePath string) error {
+	cleanPath := filepath.Clean(filePath)
+	if runtime.GOOS == "darwin" {
+		cmd := exec.Command("open", "-R", cleanPath)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to reveal file: %w", err)
+		}
+		go cmd.Wait() //nolint:errcheck
+		return nil
+	}
+
+	dir := filepath.Dir(cleanPath)
+	if fi, err := os.Stat(cleanPath); err == nil && fi.IsDir() {
+		dir = cleanPath
+	}
+	return openDirectory(dir)
 }
 
 func openDirectory(dir string) error {

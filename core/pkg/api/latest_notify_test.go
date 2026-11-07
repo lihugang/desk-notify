@@ -61,7 +61,7 @@ func TestLatestNotifyEndpoint(t *testing.T) {
 	n := &db.Notification{
 		ID:        "latest_test_1",
 		Content:   "这是一条最新测试通知",
-		Level:     "urgent",
+		Pinned:    true,
 		Duration:  0,
 		Sender:    "127.0.0.1",
 		CreatedAt: time.Now(),
@@ -80,10 +80,11 @@ func TestLatestNotifyEndpoint(t *testing.T) {
 	}
 
 	var res2 struct {
-		HasNotification bool             `json:"hasNotification"`
-		ClassName       string           `json:"className"`
-		Notification    *db.Notification `json:"notification"`
-		SoundEnabled    bool             `json:"soundEnabled"`
+		HasNotification bool               `json:"hasNotification"`
+		ClassName       string             `json:"className"`
+		Notification    *db.Notification   `json:"notification"`
+		Notifications   []*db.Notification `json:"notifications"`
+		SoundEnabled    bool               `json:"soundEnabled"`
 	}
 	if err := json.Unmarshal(rec2.Body.Bytes(), &res2); err != nil {
 		t.Fatalf("failed to parse json response: %v", err)
@@ -94,7 +95,64 @@ func TestLatestNotifyEndpoint(t *testing.T) {
 	if res2.Notification == nil || res2.Notification.ID != "latest_test_1" {
 		t.Fatalf("expected notification id 'latest_test_1', got %+v", res2.Notification)
 	}
-	if res2.Notification.Level != "urgent" {
-		t.Fatalf("expected level 'urgent', got %s", res2.Notification.Level)
+	if len(res2.Notifications) != 1 || res2.Notifications[0].ID != "latest_test_1" {
+		t.Fatalf("expected 1 notification in notifications list, got %d", len(res2.Notifications))
+	}
+	if !res2.Notification.Pinned {
+		t.Fatalf("expected pinned=true, got %v", res2.Notification.Pinned)
+	}
+
+	// 3.5 Insert an expired notification (100 mins ago) and a fresh notification (30 mins ago)
+	oldN := &db.Notification{
+		ID:        "latest_test_old",
+		Content:   "这是100分钟前的过期通知",
+		Pinned:    false,
+		Duration:  0,
+		Sender:    "127.0.0.1",
+		CreatedAt: time.Now().Add(-100 * time.Minute),
+	}
+	_ = store.SaveNotification(oldN, nil)
+
+	freshN := &db.Notification{
+		ID:        "latest_test_30m",
+		Content:   "这是30分钟前的一般通知",
+		Pinned:    false,
+		Duration:  0,
+		Sender:    "127.0.0.1",
+		CreatedAt: time.Now().Add(-30 * time.Minute),
+	}
+	_ = store.SaveNotification(freshN, nil)
+
+	req3 := httptest.NewRequest(http.MethodGet, "/api/notify/latest", nil)
+	rec3 := httptest.NewRecorder()
+	srv.handleLatestNotify(rec3, req3)
+	var res3 struct {
+		HasNotification bool               `json:"hasNotification"`
+		Notifications   []*db.Notification `json:"notifications"`
+	}
+	_ = json.Unmarshal(rec3.Body.Bytes(), &res3)
+	if !res3.HasNotification {
+		t.Fatalf("expected hasNotification=true")
+	}
+	if len(res3.Notifications) != 2 {
+		t.Fatalf("expected exactly 2 notifications within 90 mins (excluding the 100m old one), got %d", len(res3.Notifications))
+	}
+	if res3.Notifications[0].ID != "latest_test_1" || res3.Notifications[1].ID != "latest_test_30m" {
+		t.Fatalf("unexpected notifications list order or ids: %+v", res3.Notifications)
+	}
+
+	// 4. Test window minimize and stop-flash endpoints
+	reqMin := httptest.NewRequest(http.MethodPost, "/api/window/minimize", nil)
+	recMin := httptest.NewRecorder()
+	srv.handleWindowMinimize(recMin, reqMin)
+	if recMin.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for minimize, got %d", recMin.Code)
+	}
+
+	reqFlash := httptest.NewRequest(http.MethodPost, "/api/window/stop-flash", nil)
+	recFlash := httptest.NewRecorder()
+	srv.handleWindowStopFlash(recFlash, reqFlash)
+	if recFlash.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for stop-flash, got %d", recFlash.Code)
 	}
 }

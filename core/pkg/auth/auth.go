@@ -174,13 +174,17 @@ func CheckAuth(r *http.Request, cfg config.AppConfig) bool {
 	}
 
 	// If public, check if password is not set
-	if cfg.PublicPasswordHash == "" && cfg.PublicPassword == "" {
+	pwdHash := cfg.GetEffectivePasswordHash()
+	if pwdHash == "" && cfg.PublicPassword == "" {
 		return true
 	}
 
-	// Check Cookie
+	// Check Cookie (user token or admin token)
 	cookie, err := r.Cookie("dn_token")
 	if err == nil && ValidateToken(cookie.Value) {
+		return true
+	}
+	if adminCookie, err := r.Cookie("dn_admin_token"); err == nil && ValidateAdminToken(adminCookie.Value) {
 		return true
 	}
 
@@ -188,7 +192,13 @@ func CheckAuth(r *http.Request, cfg config.AppConfig) bool {
 	authHeader := r.Header.Get("Authorization")
 	if strings.HasPrefix(authHeader, "Bearer ") {
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if ValidateToken(token) {
+		if ValidateToken(token) || ValidateAdminToken(token) {
+			return true
+		}
+	}
+
+	if headerToken := r.Header.Get("X-Admin-Token"); headerToken != "" {
+		if ValidateAdminToken(headerToken) {
 			return true
 		}
 	}

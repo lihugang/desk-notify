@@ -12,7 +12,7 @@ import (
 type Notification struct {
 	ID          string        `json:"id"`
 	Content     string        `json:"content"`
-	Level       string        `json:"level"`
+	Pinned      bool          `json:"pinned"`
 	Duration    int           `json:"duration"`
 	Sender      string        `json:"sender"`
 	CreatedAt   time.Time     `json:"createdAt"`
@@ -61,7 +61,7 @@ func (s *Store) migrate() error {
 	CREATE TABLE IF NOT EXISTS notifications (
 		id TEXT PRIMARY KEY,
 		content TEXT NOT NULL,
-		level TEXT NOT NULL,
+		pinned BOOLEAN NOT NULL DEFAULT 1,
 		duration INTEGER NOT NULL,
 		sender TEXT,
 		created_at DATETIME NOT NULL
@@ -82,8 +82,11 @@ func (s *Store) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_notify_created ON notifications(created_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_att_notify ON attachments(notify_id);
 	`
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	_, _ = s.db.Exec(`ALTER TABLE notifications ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 1`)
+	return nil
 }
 
 func (s *Store) SaveNotification(n *Notification, atts []*Attachment) error {
@@ -94,7 +97,7 @@ func (s *Store) SaveNotification(n *Notification, atts []*Attachment) error {
 	defer tx.Rollback()
 
 	stmtN, err := tx.Prepare(`
-		INSERT INTO notifications (id, content, level, duration, sender, created_at)
+		INSERT INTO notifications (id, content, pinned, duration, sender, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
@@ -102,7 +105,7 @@ func (s *Store) SaveNotification(n *Notification, atts []*Attachment) error {
 	}
 	defer stmtN.Close()
 
-	if _, err := stmtN.Exec(n.ID, n.Content, n.Level, n.Duration, n.Sender, n.CreatedAt); err != nil {
+	if _, err := stmtN.Exec(n.ID, n.Content, n.Pinned, n.Duration, n.Sender, n.CreatedAt); err != nil {
 		return err
 	}
 
@@ -141,7 +144,7 @@ func (s *Store) GetHistory(limit, offset int) ([]*Notification, int, error) {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT id, content, level, duration, sender, created_at
+		SELECT id, content, pinned, duration, sender, created_at
 		FROM notifications
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
@@ -154,7 +157,7 @@ func (s *Store) GetHistory(limit, offset int) ([]*Notification, int, error) {
 	list := make([]*Notification, 0)
 	for rows.Next() {
 		var n Notification
-		if err := rows.Scan(&n.ID, &n.Content, &n.Level, &n.Duration, &n.Sender, &n.CreatedAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.Content, &n.Pinned, &n.Duration, &n.Sender, &n.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		n.Images = make([]string, 0)
@@ -162,7 +165,11 @@ func (s *Store) GetHistory(limit, offset int) ([]*Notification, int, error) {
 		list = append(list, &n)
 	}
 
-	// Fetch attachments for these notifications
+	s.populateAttachments(list)
+	return list, total, nil
+}
+
+func (s *Store) populateAttachments(list []*Notification) {
 	for _, n := range list {
 		attRows, err := s.db.Query(`
 			SELECT id, notify_id, name, size, mime_type, local_path, doc_path, is_image
@@ -185,8 +192,38 @@ func (s *Store) GetHistory(limit, offset int) ([]*Notification, int, error) {
 		}
 		attRows.Close()
 	}
+}
 
-	return list, total, nil
+func (s *Store) GetRecentWithinMinutes(minutes int) ([]*Notification, error) {
+	if minutes <= 0 {
+		minutes = 90
+	}
+	cutoff := time.Now().Add(-time.Duration(minutes) * time.Minute)
+
+	rows, err := s.db.Query(`
+		SELECT id, content, pinned, duration, sender, created_at
+		FROM notifications
+		WHERE created_at >= ?
+		ORDER BY created_at DESC
+	`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]*Notification, 0)
+	for rows.Next() {
+		var n Notification
+		if err := rows.Scan(&n.ID, &n.Content, &n.Pinned, &n.Duration, &n.Sender, &n.CreatedAt); err != nil {
+			return nil, err
+		}
+		n.Images = make([]string, 0)
+		n.Attachments = make([]*Attachment, 0)
+		list = append(list, &n)
+	}
+
+	s.populateAttachments(list)
+	return list, nil
 }
 
 func (s *Store) GetRecent(limit int) ([]*Notification, error) {

@@ -107,7 +107,7 @@ flowchart TD
     CheckCookie -->|"是"| Pass
     CheckCookie -->|"否"| RequireAuth
 
-    RequireAuth --> InputPwd["输入教师投递口令"]
+    RequireAuth --> InputPwd["输入系统统一密码 (投递/管理一体)"]
     InputPwd --> Verify{"密码正确?"}
     Verify -->|"是"| GenToken["颁发 HttpOnly JWT Cookie 并进入投递页"]
     Verify -->|"否"| Reject["提示密码错误"]
