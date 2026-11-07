@@ -30,6 +30,7 @@ type windowsManager struct {
 	historyWindow      *application.WebviewWindow
 	pendingOpenHistory bool
 	cardMoved          bool
+	currentCardHeight  int
 	cfgMgr             *config.Manager
 }
 
@@ -60,19 +61,19 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	})
 
 	// Calculate default window dimensions and position:
-	// - Height: ~82% of screen height
+	// - Initial height: 420 (compact 2-notification card size; switches dynamically for history)
 	// - Width: 680 (fixed width; locks left/right from drag resize)
 	// - Position: Top 6% of screen, horizontally centered
 	cardWidth := 680
-	cardHeight := 720
+	cardHeight := 420
 	cardX := 0
 	cardY := 0
 	primaryScreen := m.app.Screen.GetPrimary()
 	if primaryScreen != nil {
-		cardHeight = int(float64(primaryScreen.WorkArea.Height) * 0.82)
 		cardX = primaryScreen.WorkArea.X + (primaryScreen.WorkArea.Width-cardWidth)/2
 		cardY = primaryScreen.WorkArea.Y + int(float64(primaryScreen.WorkArea.Height)*0.06)
 	}
+	m.currentCardHeight = cardHeight
 
 	// Create frameless floating card window (alwaysOnTop, transparent background)
 	// MinWidth == MaxWidth == 680 prevents left/right border drag resize,
@@ -112,6 +113,16 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	})
 	m.cardWindow.OnWindowEvent(events.Common.WindowDidMove, func(event *application.WindowEvent) {
 		m.cardMoved = true
+	})
+	m.cardWindow.OnWindowEvent(events.Common.WindowDidResize, func(event *application.WindowEvent) {
+		if m.cardWindow != nil {
+			_, h := m.cardWindow.Size()
+			if h >= 240 {
+				m.mu.Lock()
+				m.currentCardHeight = h
+				m.mu.Unlock()
+			}
+		}
 	})
 
 	isFirstRun := cfgMgr.IsFirstRun()
@@ -276,15 +287,40 @@ func (m *windowsManager) positionCardWindowDefault() {
 		return
 	}
 	cardWidth := 680
+	m.mu.RLock()
+	height := m.currentCardHeight
+	m.mu.RUnlock()
+	if height < 240 {
+		height = 420
+	}
 	primaryScreen := m.app.Screen.GetPrimary()
 	if primaryScreen != nil {
-		cardHeight := int(float64(primaryScreen.WorkArea.Height) * 0.82)
 		cardX := primaryScreen.WorkArea.X + (primaryScreen.WorkArea.Width-cardWidth)/2
 		cardY := primaryScreen.WorkArea.Y + int(float64(primaryScreen.WorkArea.Height)*0.06)
-		m.cardWindow.SetSize(cardWidth, cardHeight)
+		m.cardWindow.SetSize(cardWidth, height)
 		m.cardWindow.SetPosition(cardX, cardY)
 	} else {
+		m.cardWindow.SetSize(cardWidth, height)
 		m.cardWindow.Center()
+	}
+}
+
+func (m *windowsManager) SetCardHeight(height int) {
+	if height < 240 {
+		height = 240
+	}
+	if height > 2400 {
+		height = 2400
+	}
+
+	m.mu.Lock()
+	m.currentCardHeight = height
+	cardWin := m.cardWindow
+	m.mu.Unlock()
+
+	if cardWin != nil {
+		cardWidth := 680
+		cardWin.SetSize(cardWidth, height)
 	}
 }
 

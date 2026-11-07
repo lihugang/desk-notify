@@ -157,6 +157,22 @@ func TestLatestNotifyEndpoint(t *testing.T) {
 	if recFlash.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK for stop-flash, got %d", recFlash.Code)
 	}
+
+	// Test handleCardHeight
+	reqHeight := httptest.NewRequest(http.MethodPost, "/api/window/card-height", strings.NewReader(`{"height": 500}`))
+	recHeight := httptest.NewRecorder()
+	srv.handleCardHeight(recHeight, reqHeight)
+	if recHeight.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for card-height, got %d", recHeight.Code)
+	}
+
+	// Invalid height
+	reqBadHeight := httptest.NewRequest(http.MethodPost, "/api/window/card-height", strings.NewReader(`{"height": 50}`))
+	recBadHeight := httptest.NewRecorder()
+	srv.handleCardHeight(recBadHeight, reqBadHeight)
+	if recBadHeight.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for card-height < 200, got %d", recBadHeight.Code)
+	}
 }
 
 func TestBroadcastNotificationWithRecentList(t *testing.T) {

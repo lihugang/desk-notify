@@ -66,6 +66,10 @@ func (m *headlessManager) StopFlash() {
 	logger.Infof("[DeskNotify 桌面弹窗] 停止任务栏闪烁")
 }
 
+func (m *headlessManager) SetCardHeight(height int) {
+	logger.Infof("[DeskNotify 桌面弹窗] 调整卡片高度为: %dpx", height)
+}
+
 func (m *headlessManager) OpenSettings() {
 	if m.cfgMgr != nil {
 		url := fmt.Sprintf("http://localhost:%d/settings", m.cfgMgr.Get().Port)

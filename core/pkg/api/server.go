@@ -102,6 +102,7 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
 	mux.HandleFunc("/api/window/minimize", s.handleWindowMinimize)
 	mux.HandleFunc("/api/window/stop-flash", s.handleWindowStopFlash)
+	mux.HandleFunc("/api/window/card-height", s.handleCardHeight)
 	mux.HandleFunc("/api/window/settings-hide", s.handleSettingsHide)
 	mux.HandleFunc("/api/window/settings-show", s.handleSettingsShow)
 	mux.HandleFunc("/api/config/lock-admin", s.handleAdminLock)
@@ -708,6 +709,24 @@ func (s *Server) handleWindowMinimize(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWindowStopFlash(w http.ResponseWriter, r *http.Request) {
 	if s.desktop != nil {
 		s.desktop.StopFlash()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleCardHeight(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Height int `json:"height"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Height < 200 || req.Height > 3000 {
+		http.Error(w, "Invalid height", http.StatusBadRequest)
+		return
+	}
+	if s.desktop != nil {
+		s.desktop.SetCardHeight(req.Height)
 	}
 	w.WriteHeader(http.StatusOK)
 }

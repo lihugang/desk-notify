@@ -30,6 +30,7 @@ func (m *mockDesktopManager) ShowCard()                        {}
 func (m *mockDesktopManager) HideCard()                        {}
 func (m *mockDesktopManager) MinimizeCard()                    {}
 func (m *mockDesktopManager) StopFlash()                       {}
+func (m *mockDesktopManager) SetCardHeight(height int)          {}
 func (m *mockDesktopManager) OpenSettings()                    {}
 func (m *mockDesktopManager) HideSettings()                    {}
 func (m *mockDesktopManager) OpenHistory()                     {}

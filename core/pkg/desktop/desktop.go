@@ -12,6 +12,7 @@ type Manager interface {
 	HideCard()
 	MinimizeCard()
 	StopFlash()
+	SetCardHeight(height int)
 	OpenSettings()
 	HideSettings()
 	OpenHistory()

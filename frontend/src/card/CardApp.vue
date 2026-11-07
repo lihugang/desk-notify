@@ -6,7 +6,7 @@
   >
     <!-- Card Container -->
     <div
-      class="relative w-full max-w-2xl bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform transition-all duration-300 animate-slide-in text-slate-800 flex flex-col h-full"
+      class="relative w-full max-w-2xl bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform animate-slide-in text-slate-800 flex flex-col h-full transition-[box-shadow,background-color] duration-300"
       :class="notifications.length > 0 && notifications[0].pinned ? 'ring-2 ring-amber-500/40 shadow-amber-500/10' : 'ring-1 ring-blue-500/20 shadow-blue-500/5'"
     >
       <!-- Top Resize Border (Vertical drag resize only) -->
@@ -213,7 +213,7 @@
     @click.self="handleBackdropClick"
   >
     <div
-      class="relative w-full max-w-md bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform transition-all duration-300 animate-slide-in text-slate-800 flex flex-col"
+      class="relative w-full max-w-md bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform animate-slide-in text-slate-800 flex flex-col h-full transition-[box-shadow,background-color] duration-300"
     >
       <!-- Top Resize Border -->
       <div
@@ -238,7 +238,7 @@
         <div class="flex items-center space-x-2" style="-webkit-app-region: no-drag;" data-no-drag>
           <!-- History Mode Toggle Button -->
           <button
-            @click="viewMode = 'history'; showEmptyState = false"
+            @click="switchToHistory"
             class="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 transition flex items-center gap-1 cursor-pointer shadow-2xs"
             title="查看历史通知记录"
             data-no-drag
@@ -304,7 +304,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { Clock, X, FileText, Folder, ExternalLink, History, Bell, Inbox, Minus, Pin } from 'lucide-vue-next';
 import { marked } from 'marked';
 import type { NotificationMessage, Attachment } from '../types';
@@ -323,6 +323,72 @@ const currentFontSize = ref(
   (typeof localStorage !== 'undefined' && localStorage.getItem('desknotify_font_size')) || '16px'
 );
 let timer: any = null;
+
+// Mode-specific height constants and persistence
+const DEFAULT_CURRENT_HEIGHT = 420; // 默认最新通知大小：顶部拖动条 + 2 条通知
+const DEFAULT_HISTORY_HEIGHT = 760; // 默认历史通知大小：大屏长列表
+let lastAppliedHeight = 0;
+let resizeDebounceTimer: any = null;
+
+function getSavedHeightForMode(mode: 'current' | 'history'): number {
+  try {
+    const key = mode === 'current' ? 'desknotify_card_height_current' : 'desknotify_card_height_history';
+    const val = localStorage.getItem(key);
+    if (val) {
+      const parsed = parseInt(val, 10);
+      if (!isNaN(parsed) && parsed >= 240 && parsed <= 2400) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return mode === 'current' ? DEFAULT_CURRENT_HEIGHT : DEFAULT_HISTORY_HEIGHT;
+}
+
+async function syncWindowHeight(mode: 'current' | 'history') {
+  const targetHeight = getSavedHeightForMode(mode);
+  if (lastAppliedHeight === targetHeight) return;
+  lastAppliedHeight = targetHeight;
+  try {
+    await fetch('/api/window/card-height', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ height: targetHeight }),
+    });
+  } catch (e) {
+    console.warn('调整窗口高度失败:', e);
+  }
+}
+
+function handleWindowResize() {
+  if (!isCardVisible.value) return;
+  if (resizeDebounceTimer) {
+    clearTimeout(resizeDebounceTimer);
+  }
+  resizeDebounceTimer = setTimeout(() => {
+    const currentHeight = window.innerHeight;
+    if (currentHeight >= 240 && currentHeight <= 2400) {
+      const diff = Math.abs(currentHeight - lastAppliedHeight);
+      if (diff >= 5) {
+        lastAppliedHeight = currentHeight;
+        const key = viewMode.value === 'current' ? 'desknotify_card_height_current' : 'desknotify_card_height_history';
+        try {
+          localStorage.setItem(key, String(currentHeight));
+        } catch {}
+      }
+    }
+  }, 200);
+}
+
+function switchToHistory() {
+  viewMode.value = 'history';
+  showEmptyState.value = false;
+  isCardVisible.value = true;
+  syncWindowHeight('history');
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
 
 function renderMarkdown(content?: string): string {
   if (!content) return '';
@@ -353,6 +419,7 @@ function handleIncomingNotification(msg: any) {
   viewMode.value = 'current';
   showEmptyState.value = false;
   isCardVisible.value = true;
+  syncWindowHeight('current');
 
   // 1. If msg contains full 90-minute notifications list from backend WebSocket
   if (msg.notifications && Array.isArray(msg.notifications) && msg.notifications.length > 0) {
@@ -455,6 +522,15 @@ onMounted(() => {
 
   window.addEventListener('pointerdown', handleWindowInteraction);
   window.addEventListener('click', handleWindowInteraction);
+  window.addEventListener('resize', handleWindowResize);
+  syncWindowHeight(viewMode.value);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleWindowResize);
+  if (resizeDebounceTimer) {
+    clearTimeout(resizeDebounceTimer);
+  }
 });
 
 function toggleViewMode() {
@@ -462,6 +538,7 @@ function toggleViewMode() {
     viewMode.value = 'history';
     showEmptyState.value = false;
     isCardVisible.value = true;
+    syncWindowHeight('history');
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -469,6 +546,7 @@ function toggleViewMode() {
   } else {
     viewMode.value = 'current';
     isCardVisible.value = true;
+    syncWindowHeight('current');
     if (notifications.value.length === 0) {
       fetchLatestNotification(false);
     } else if (notifications.value[0]?.duration > 0 && remainingSeconds.value > 0) {
@@ -526,6 +604,7 @@ async function fetchLatestNotification(playSound: boolean = false) {
 (window as any).deskNotifyShowLatest = async () => {
   viewMode.value = 'current';
   isCardVisible.value = true;
+  syncWindowHeight('current');
   await fetchLatestNotification(false);
   if (notifications.value.length === 0) {
     showEmptyState.value = true;
@@ -599,6 +678,7 @@ function closeCard() {
   isCardVisible.value = false;
   showEmptyState.value = false;
   viewMode.value = 'current';
+  lastAppliedHeight = 0;
   if ((window as any).runtime?.WindowHide) {
     (window as any).runtime.WindowHide();
   }
