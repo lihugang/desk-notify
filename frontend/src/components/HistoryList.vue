@@ -78,7 +78,8 @@
         <!-- Full Markdown Content (No truncation) -->
         <div
           v-if="item.content"
-          class="markdown-content text-slate-800 text-sm leading-relaxed"
+          class="markdown-content text-slate-800 leading-relaxed"
+          :style="{ fontSize: currentFontSize }"
           v-html="renderMarkdown(item.content)"
         ></div>
 
@@ -190,7 +191,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import {
   History, RefreshCw, Inbox, ImageIcon, Paperclip,
   FileText, Folder, ExternalLink, ZoomIn, Loader2, CheckCircle2, Pin, Clock
@@ -198,6 +199,7 @@ import {
 import { marked } from 'marked';
 import type { NotificationMessage, Attachment } from '../types';
 import ImageLightbox from './ImageLightbox.vue';
+import { spacePage } from '../utils/pangu';
 
 const props = defineProps<{
   title?: string;
@@ -212,6 +214,9 @@ const loadingMore = ref(false);
 const hasMore = ref(true);
 const selectedFilter = ref<'all' | 'pinned' | 'unpinned'>('all');
 const activeLightboxImage = ref<string | null>(null);
+const currentFontSize = ref(
+  (typeof localStorage !== 'undefined' && localStorage.getItem('desknotify_font_size')) || '16px'
+);
 
 const sentinelRef = ref<HTMLDivElement | null>(null);
 let observer: IntersectionObserver | null = null;
@@ -227,6 +232,20 @@ const filteredItems = computed(() => {
 });
 
 onMounted(() => {
+  if (typeof BroadcastChannel !== 'undefined') {
+    const fontChannel = new BroadcastChannel('desknotify_font_channel');
+    fontChannel.onmessage = (e) => {
+      if (e.data?.fontSize) {
+        currentFontSize.value = e.data.fontSize;
+      }
+    };
+  }
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'desknotify_font_size' && e.newValue) {
+      currentFontSize.value = e.newValue;
+    }
+  });
+
   fetchInitial();
   setupObserver();
 });
@@ -328,7 +347,9 @@ function prependItem(item: NotificationMessage) {
 
 function renderMarkdown(content: string): string {
   if (!content) return '';
-  return marked.parse(content, { breaks: true, gfm: true }) as string;
+  const html = marked.parse(content, { breaks: true, gfm: true }) as string;
+  nextTick(() => spacePage());
+  return html;
 }
 
 function openLightbox(url: string) {

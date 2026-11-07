@@ -52,7 +52,28 @@
       </div>
 
       <!-- Editor Card -->
-      <div v-else class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div
+        v-else
+        class="bg-white rounded-2xl shadow-sm border overflow-hidden relative transition-all duration-150"
+        :class="isDragging ? 'border-blue-500 ring-2 ring-blue-400/50 bg-blue-50/10' : 'border-slate-200'"
+        @dragenter.prevent="handleDragEnter"
+        @dragover.prevent="handleDragOver"
+        @dragleave.prevent="handleDragLeave"
+        @drop.prevent="handleDrop"
+      >
+        <!-- Drag & Drop Visual Overlay -->
+        <div
+          v-if="isDragging"
+          class="absolute inset-0 z-20 bg-blue-50/95 backdrop-blur-xs border-2 border-dashed border-blue-500 rounded-2xl flex flex-col items-center justify-center p-6 text-center pointer-events-none transition-all duration-200 shadow-inner"
+        >
+          <div class="w-14 h-14 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center mb-3 shadow-xs">
+            <UploadCloud class="w-7 h-7 animate-bounce" />
+          </div>
+          <h3 class="text-base font-bold text-blue-900">松开鼠标即可插入文件</h3>
+          <p class="text-xs text-blue-600 mt-1 max-w-xs leading-normal">
+            图片将自动归类到图片预览 · 课件及文档将自动加入附件
+          </p>
+        </div>
         <!-- Visual Formatting Toolbar (Without exposing raw markdown) -->
         <div class="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 text-slate-600">
           <div class="flex items-center space-x-1">
@@ -184,7 +205,7 @@
             ref="textareaRef"
             v-model="textContent"
             rows="10"
-            placeholder="请输入要投递给班级大屏的通知正文...（可直接按 Ctrl+V 粘贴剪贴板截图）"
+            placeholder="请输入要投递给班级大屏的通知正文...（支持直接拖入文件/图片，或按 Ctrl+V 粘贴截图与文件）"
             class="w-full text-base placeholder-slate-400 focus:outline-none resize-y min-h-[240px] leading-relaxed text-slate-800"
           ></textarea>
 
@@ -280,14 +301,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import {
   Bell, Lock, Bold, Italic, Heading2, List, Quote,
-  ImageIcon, Paperclip, Send, X, FileText, Pin, ZoomIn, Eye, Edit3
+  ImageIcon, Paperclip, Send, X, FileText, Pin, ZoomIn, Eye, Edit3,
+  UploadCloud
 } from 'lucide-vue-next';
 import { marked } from 'marked';
 import HistoryList from '../components/HistoryList.vue';
 import ImageLightbox from '../components/ImageLightbox.vue';
+import { spaceText, spacePage } from '../utils/pangu';
 
 interface UploadItem {
   file: File;
@@ -315,12 +338,23 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
 const activeLightboxImage = ref<string | null>(null);
 const isPreview = ref(false);
+const isDragging = ref(false);
+const dragCounter = ref(0);
 
 const renderedMarkdown = computed(() => {
   if (!textContent.value.trim()) {
     return '<p class="text-slate-400 italic">（暂无正文内容）</p>';
   }
-  return marked.parse(textContent.value, { breaks: true, gfm: true }) as string;
+  const html = marked.parse(textContent.value, { breaks: true, gfm: true }) as string;
+  nextTick(() => spacePage());
+  return html;
+});
+
+watch(isPreview, async (val) => {
+  if (val) {
+    await nextTick();
+    spacePage();
+  }
 });
 
 function previewImage(url?: string) {
@@ -329,14 +363,22 @@ function previewImage(url?: string) {
   }
 }
 
+function preventWindowDrop(e: DragEvent) {
+  e.preventDefault();
+}
+
 onMounted(() => {
   checkAuthAndStatus();
+  window.addEventListener('dragover', preventWindowDrop);
+  window.addEventListener('drop', preventWindowDrop);
 });
 
 onUnmounted(() => {
   images.value.forEach(img => {
     if (img.preview) URL.revokeObjectURL(img.preview);
   });
+  window.removeEventListener('dragover', preventWindowDrop);
+  window.removeEventListener('drop', preventWindowDrop);
 });
 
 async function checkAuthAndStatus() {
@@ -399,19 +441,102 @@ function applyFormat(type: 'bold' | 'italic' | 'h2' | 'list' | 'quote') {
   textContent.value = textContent.value.substring(0, start) + replacement + textContent.value.substring(end);
 }
 
-function handlePaste(e: ClipboardEvent) {
-  const items = e.clipboardData?.items;
-  if (!items) return;
-  for (let i = 0; i < items.length; i++) {
-    if (items[i].type.indexOf('image') !== -1) {
-      const file = items[i].getAsFile();
-      if (file) {
+function isImageFile(file: File): boolean {
+  if (file.type && file.type.startsWith('image/')) {
+    return true;
+  }
+  const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+  return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico', '.avif'].includes(ext);
+}
+
+function processFiles(files: File[]) {
+  if (!files || files.length === 0) return;
+
+  // Auto switch back to edit mode if currently previewing
+  if (isPreview.value) {
+    isPreview.value = false;
+  }
+
+  for (const file of files) {
+    if (isImageFile(file)) {
+      const exists = images.value.some(img => img.name === file.name && img.size === file.size);
+      if (!exists) {
         images.value.push({
           file,
           preview: URL.createObjectURL(file),
-          name: file.name || `screenshot_${Date.now()}.png`,
+          name: file.name || `image_${Date.now()}.png`,
           size: file.size
         });
+      }
+    } else {
+      const exists = attachments.value.some(att => att.name === file.name && att.size === file.size);
+      if (!exists) {
+        attachments.value.push({
+          file,
+          name: file.name,
+          size: file.size
+        });
+      }
+    }
+  }
+}
+
+function handleDragEnter(e: DragEvent) {
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+    dragCounter.value++;
+    isDragging.value = true;
+  }
+}
+
+function handleDragOver(e: DragEvent) {
+  if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }
+}
+
+function handleDragLeave() {
+  dragCounter.value--;
+  if (dragCounter.value <= 0) {
+    dragCounter.value = 0;
+    isDragging.value = false;
+  }
+}
+
+function handleDrop(e: DragEvent) {
+  e.preventDefault();
+  dragCounter.value = 0;
+  isDragging.value = false;
+
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+
+  processFiles(Array.from(files));
+}
+
+function handlePaste(e: ClipboardEvent) {
+  const clipboardFiles = e.clipboardData?.files;
+  if (clipboardFiles && clipboardFiles.length > 0) {
+    e.preventDefault();
+    processFiles(Array.from(clipboardFiles));
+    return;
+  }
+
+  const items = e.clipboardData?.items;
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          images.value.push({
+            file,
+            preview: URL.createObjectURL(file),
+            name: file.name || `screenshot_${Date.now()}.png`,
+            size: file.size
+          });
+        }
       }
     }
   }
@@ -420,27 +545,14 @@ function handlePaste(e: ClipboardEvent) {
 function handleImageSelect(e: Event) {
   const target = e.target as HTMLInputElement;
   if (!target.files) return;
-  Array.from(target.files).forEach(file => {
-    images.value.push({
-      file,
-      preview: URL.createObjectURL(file),
-      name: file.name,
-      size: file.size
-    });
-  });
+  processFiles(Array.from(target.files));
   target.value = '';
 }
 
 function handleFileSelect(e: Event) {
   const target = e.target as HTMLInputElement;
   if (!target.files) return;
-  Array.from(target.files).forEach(file => {
-    attachments.value.push({
-      file,
-      name: file.name,
-      size: file.size
-    });
-  });
+  processFiles(Array.from(target.files));
   target.value = '';
 }
 
@@ -464,8 +576,12 @@ async function handleSubmit() {
   submitting.value = true;
 
   try {
+    // 发送通知时自动应用盘古之白
+    const formattedContent = spaceText(textContent.value);
+    textContent.value = formattedContent;
+
     const formData = new FormData();
-    formData.append('content', textContent.value);
+    formData.append('content', formattedContent);
     formData.append('pinned', isPinned.value ? 'true' : 'false');
     formData.append('duration', duration.value.toString());
 

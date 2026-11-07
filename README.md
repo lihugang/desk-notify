@@ -1,4 +1,4 @@
-# DeskNotify 班级桌面通知投递系统
+# DeskNotify 传纸条
 
 > 一体化轻量级班级桌面通知系统。专为教室多媒体大屏、白板与讲台电脑设计，后端采用 Go 语言构建，前端采用 Vue 3 + TypeScript + Tailwind CSS，支持 PWA 教师手机管理端，依托 frp 原生穿透与 SQLite3 嵌入式持久化存储。
 

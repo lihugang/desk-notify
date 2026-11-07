@@ -6,7 +6,7 @@
   >
     <!-- Card Container -->
     <div
-      class="relative w-full max-w-2xl bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform transition-all duration-300 animate-slide-in text-slate-800 flex flex-col h-full max-h-[70vh]"
+      class="relative w-full max-w-2xl bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform transition-all duration-300 animate-slide-in text-slate-800 flex flex-col h-full"
       :class="notifications.length > 0 && notifications[0].pinned ? 'ring-2 ring-amber-500/40 shadow-amber-500/10' : 'ring-1 ring-blue-500/20 shadow-blue-500/5'"
     >
       <!-- Top Resize Border (Vertical drag resize only) -->
@@ -32,7 +32,7 @@
             :class="notifications.length > 0 && notifications[0].pinned ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white'"
           >
             <Bell class="w-3 h-3" />
-            <span>最新通知 (最近90分钟)</span>
+            <span>最新通知</span>
           </span>
           <span
             v-else
@@ -131,7 +131,8 @@
 
           <!-- Markdown Content -->
           <div
-            class="markdown-content text-slate-800 text-base leading-relaxed font-normal"
+            class="markdown-content text-slate-800 leading-relaxed font-normal"
+            :style="{ fontSize: currentFontSize }"
             v-html="renderMarkdown(item.content)"
           ></div>
 
@@ -303,12 +304,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
 import { Clock, X, FileText, Folder, ExternalLink, History, Bell, Inbox, Minus, Pin } from 'lucide-vue-next';
 import { marked } from 'marked';
 import type { NotificationMessage, Attachment } from '../types';
 import HistoryList from '../components/HistoryList.vue';
 import ImageLightbox from '../components/ImageLightbox.vue';
+import { spacePage } from '../utils/pangu';
 
 const notifications = ref<NotificationMessage[]>([]);
 const classroomName = ref('班级大屏');
@@ -317,11 +319,16 @@ const viewMode = ref<'current' | 'history'>('current');
 const showEmptyState = ref(false);
 const isCardVisible = ref(false);
 const activeLightboxImage = ref<string | null>(null);
+const currentFontSize = ref(
+  (typeof localStorage !== 'undefined' && localStorage.getItem('desknotify_font_size')) || '16px'
+);
 let timer: any = null;
 
 function renderMarkdown(content?: string): string {
   if (!content) return '';
-  return marked.parse(content, { breaks: true, gfm: true }) as string;
+  const html = marked.parse(content, { breaks: true, gfm: true }) as string;
+  nextTick(() => spacePage());
+  return html;
 }
 
 function handleWindowInteraction() {
@@ -414,6 +421,20 @@ function handleResizeBottom(e: MouseEvent) {
 }
 
 onMounted(() => {
+  if (typeof BroadcastChannel !== 'undefined') {
+    const fontChannel = new BroadcastChannel('desknotify_font_channel');
+    fontChannel.onmessage = (e) => {
+      if (e.data?.fontSize) {
+        currentFontSize.value = e.data.fontSize;
+      }
+    };
+  }
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'desknotify_font_size' && e.newValue) {
+      currentFontSize.value = e.newValue;
+    }
+  });
+
   connectWebSocket();
   fetchLatestNotification(false).then(() => {
     if (notifications.value.length > 0) {
@@ -463,6 +484,12 @@ async function fetchLatestNotification(playSound: boolean = false) {
       const data = await res.json();
       if (data.className) {
         classroomName.value = data.className;
+      }
+      if (data.fontSize) {
+        currentFontSize.value = data.fontSize;
+        try {
+          localStorage.setItem('desknotify_font_size', data.fontSize);
+        } catch {}
       }
       const rawList: NotificationMessage[] = data.notifications && data.notifications.length > 0
         ? data.notifications
@@ -516,6 +543,24 @@ function connectWebSocket() {
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
+      if (msg.type === 'config') {
+        if (msg.fontSize) {
+          currentFontSize.value = msg.fontSize;
+          try {
+            localStorage.setItem('desknotify_font_size', msg.fontSize);
+          } catch {}
+        }
+        if (msg.className) {
+          classroomName.value = msg.className;
+        }
+        return;
+      }
+      if (msg.fontSize) {
+        currentFontSize.value = msg.fontSize;
+        try {
+          localStorage.setItem('desknotify_font_size', msg.fontSize);
+        } catch {}
+      }
       handleIncomingNotification(msg);
     } catch (e) {
       console.error('解析推送消息失败', e);

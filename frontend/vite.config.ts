@@ -10,9 +10,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'DeskNotify 班级通知投递',
+        name: '传纸条',
         short_name: 'DeskNotify',
-        description: '便捷高效的班级桌面通知投递系统',
+        description: 'DeskNotify 传纸条',
         theme_color: '#3b82f6',
         background_color: '#ffffff',
         display: 'standalone',

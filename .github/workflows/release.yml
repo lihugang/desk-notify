@@ -78,7 +78,7 @@ jobs:
           Write-Host "Found SignTool at: $signtool"
 
           # Sign binary with SHA256, RFC3161 timestamp, software name and project URL
-          & $signtool sign /f $pfxPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "传纸条 (DeskNotify)" /du "https://github.com/lihugang/DeskNotify" build/DeskNotify.exe
+          & $signtool sign /f $pfxPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "DeskNotify 传纸条" /du "https://github.com/lihugang/DeskNotify" build/DeskNotify.exe
 
           # Temporarily install root CA to Runner's Trusted Root store so Authenticode verification succeeds
           certutil -addstore -f Root certs/Lihugang-CA.cer

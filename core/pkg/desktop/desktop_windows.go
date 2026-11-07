@@ -45,7 +45,7 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 
 	m.app = application.New(application.Options{
 		Name:        "DeskNotify",
-		Description: "班级桌面通知投递系统",
+		Description: "DeskNotify 传纸条",
 		Icon:        trayIconBytes,
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "com.lihugang.desknotify",
@@ -60,18 +60,18 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	})
 
 	// Calculate default window dimensions and position:
-	// - Height: ~70% of screen height
+	// - Height: ~82% of screen height
 	// - Width: 680 (fixed width; locks left/right from drag resize)
-	// - Position: Top 10% of screen, horizontally centered
+	// - Position: Top 6% of screen, horizontally centered
 	cardWidth := 680
-	cardHeight := 540
+	cardHeight := 720
 	cardX := 0
 	cardY := 0
 	primaryScreen := m.app.Screen.GetPrimary()
 	if primaryScreen != nil {
-		cardHeight = int(float64(primaryScreen.WorkArea.Height) * 0.70)
+		cardHeight = int(float64(primaryScreen.WorkArea.Height) * 0.82)
 		cardX = primaryScreen.WorkArea.X + (primaryScreen.WorkArea.Width-cardWidth)/2
-		cardY = primaryScreen.WorkArea.Y + int(float64(primaryScreen.WorkArea.Height)*0.10)
+		cardY = primaryScreen.WorkArea.Y + int(float64(primaryScreen.WorkArea.Height)*0.06)
 	}
 
 	// Create frameless floating card window (alwaysOnTop, transparent background)
@@ -79,13 +79,13 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	// while DisableResize: false and MinHeight/MaxHeight allow top/bottom border drag resize.
 	m.cardWindow = m.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "card-window",
-		Title:            "DeskNotify 桌面通知",
+		Title:            "传纸条",
 		Width:            cardWidth,
 		Height:           cardHeight,
 		MinWidth:         cardWidth,
 		MaxWidth:         cardWidth,
-		MinHeight:        220,
-		MaxHeight:        1400,
+		MinHeight:        240,
+		MaxHeight:        2400,
 		X:                cardX,
 		Y:                cardY,
 		AlwaysOnTop:      true,
@@ -119,7 +119,7 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	// Create Settings & QR Window (integrated Wails desktop UI)
 	m.settingsWindow = m.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:   "settings-window",
-		Title:  fmt.Sprintf("DeskNotify 班级设置与扫码 - %s", cfg.ClassName),
+		Title:  fmt.Sprintf("传纸条 · 班级设置与扫码 - %s", cfg.ClassName),
 		Width:  740,
 		Height: 800,
 		URL:    fmt.Sprintf("http://localhost:%d/settings", cfg.Port),
@@ -133,6 +133,11 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	})
 
 	if isFirstRun {
+		go func() {
+			if err := m.PinToTaskbar(); err != nil {
+				logger.Warnf("[DeskNotify] 首次启动固定到底部任务栏提示: %v", err)
+			}
+		}()
 		m.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(event *application.ApplicationEvent) {
 			m.OpenSettings()
 			_ = m.cfgMgr.MarkFirstRunComplete()
@@ -142,7 +147,7 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	// Create History Window (dedicated desktop history viewer)
 	m.historyWindow = m.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:   "history-window",
-		Title:  fmt.Sprintf("DeskNotify 班级通知历史 - %s", cfg.ClassName),
+		Title:  fmt.Sprintf("传纸条 · 班级通知历史 - %s", cfg.ClassName),
 		Width:  820,
 		Height: 680,
 		URL:    fmt.Sprintf("http://localhost:%d/history", cfg.Port),
@@ -166,7 +171,7 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	if len(trayIconBytes) > 0 {
 		tray.SetIcon(trayIconBytes)
 	}
-	tray.SetTooltip(fmt.Sprintf("DeskNotify - %s", cfg.ClassName))
+	tray.SetTooltip(fmt.Sprintf("传纸条 - %s", cfg.ClassName))
 
 	menu := m.app.NewMenu()
 	infoItem := menu.Add(fmt.Sprintf("班级: %s", cfg.ClassName))
@@ -195,6 +200,14 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 		if err := m.OpenLogsDir(); err != nil {
 			logger.Errorf("[DeskNotify] 打开运行日志目录失败: %v", err)
 		}
+	})
+
+	menu.Add("固定到底部任务栏").OnClick(func(ctx *application.Context) {
+		go func() {
+			if err := m.PinToTaskbar(); err != nil {
+				logger.Warnf("[DeskNotify] 固定到底部任务栏提示: %v", err)
+			}
+		}()
 	})
 
 	tray.SetMenu(menu)
@@ -265,9 +278,9 @@ func (m *windowsManager) positionCardWindowDefault() {
 	cardWidth := 680
 	primaryScreen := m.app.Screen.GetPrimary()
 	if primaryScreen != nil {
-		cardHeight := int(float64(primaryScreen.WorkArea.Height) * 0.70)
+		cardHeight := int(float64(primaryScreen.WorkArea.Height) * 0.82)
 		cardX := primaryScreen.WorkArea.X + (primaryScreen.WorkArea.Width-cardWidth)/2
-		cardY := primaryScreen.WorkArea.Y + int(float64(primaryScreen.WorkArea.Height)*0.10)
+		cardY := primaryScreen.WorkArea.Y + int(float64(primaryScreen.WorkArea.Height)*0.06)
 		m.cardWindow.SetSize(cardWidth, cardHeight)
 		m.cardWindow.SetPosition(cardX, cardY)
 	} else {
@@ -418,6 +431,10 @@ func (m *windowsManager) RevealFile(filePath string) error {
 	return revealFile(filePath)
 }
 
+func (m *windowsManager) PinToTaskbar() error {
+	return PinSelfToTaskbar()
+}
+
 func (m *windowsManager) Quit() {
 	if m.app != nil {
 		m.app.Quit()
@@ -517,5 +534,134 @@ func openDirectory(dir string) error {
 		return fmt.Errorf("failed to start explorer: %w", err)
 	}
 	go cmd.Wait() //nolint:errcheck
+	return nil
+}
+
+// PinSelfToTaskbar pins the application executable or shortcut to the Windows taskbar.
+func PinSelfToTaskbar() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		logger.Errorf("[DeskNotify] 固定任务栏失败: 无法获取可执行文件路径: %v", err)
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(exePath); err == nil && resolved != "" {
+		exePath = resolved
+	}
+	cleanExePath := filepath.Clean(exePath)
+
+	logger.Infof("[DeskNotify] 正在将应用固定到底部任务栏: %s", cleanExePath)
+
+	psScript := fmt.Sprintf(`
+$target = '%s'
+$appData = [System.Environment]::GetFolderPath('ApplicationData')
+$programsDir = Join-Path $appData 'Microsoft\Windows\Start Menu\Programs'
+$shortcutPath = Join-Path $programsDir 'DeskNotify.lnk'
+
+# 1. Ensure Start Menu Programs directory exists
+if (-not (Test-Path $programsDir)) {
+    New-Item -ItemType Directory -Path $programsDir -Force | Out-Null
+}
+
+$wsh = New-Object -ComObject WScript.Shell
+
+# 2. Create Start Menu shortcut if not present
+if (-not (Test-Path $shortcutPath)) {
+    try {
+        $s = $wsh.CreateShortcut($shortcutPath)
+        $s.TargetPath = $target
+        $s.WorkingDirectory = Split-Path $target
+        $s.IconLocation = "$target,0"
+        $s.Description = "DeskNotify 班级桌面通知"
+        $s.Save()
+    } catch {}
+}
+
+# 3. Check if already pinned in User Pinned\TaskBar
+$taskbarDir = Join-Path $appData 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
+if (Test-Path $taskbarDir) {
+    $existing = Get-ChildItem -Path $taskbarDir -Filter "*.lnk" -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $lnk = $wsh.CreateShortcut($_.FullName)
+            $lnk.TargetPath -eq $target -or $_.Name -like "*DeskNotify*"
+        } catch { $false }
+    }
+    if ($existing) {
+        Write-Output "ALREADY_PINNED"
+        exit 0
+    }
+}
+
+# 4. Modern Windows (Windows 10 / 11) using CommandStore ExplorerCommandHandler
+$pinned = $false
+$cmdKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell\Windows.taskbarpin"
+if (Test-Path $cmdKey) {
+    try {
+        $handler = (Get-ItemProperty $cmdKey).ExplorerCommandHandler
+        if ($handler) {
+            $tempKey = "HKCU:\Software\Classes\*\shell\DeskNotifyPinTemp"
+            New-Item -Path $tempKey -Force | Out-Null
+            Set-ItemProperty -Path $tempKey -Name "ExplorerCommandHandler" -Value $handler
+            try {
+                $shell = New-Object -ComObject Shell.Application
+                foreach ($itemPath in @($shortcutPath, $target)) {
+                    if (Test-Path $itemPath) {
+                        $folder = $shell.Namespace((Split-Path $itemPath))
+                        $item = $folder.ParseName((Split-Path $itemPath -Leaf))
+                        if ($item) {
+                            $item.InvokeVerb("DeskNotifyPinTemp")
+                            $pinned = $true
+                            break
+                        }
+                    }
+                }
+            } finally {
+                Remove-Item -Path $tempKey -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {}
+}
+
+# 5. Fallback for older Windows / localized shell verb
+if (-not $pinned) {
+    try {
+        $shell = New-Object -ComObject Shell.Application
+        foreach ($itemPath in @($shortcutPath, $target)) {
+            if (Test-Path $itemPath) {
+                $folder = $shell.Namespace((Split-Path $itemPath))
+                $item = $folder.ParseName((Split-Path $itemPath -Leaf))
+                if ($item) {
+                    foreach ($verb in $item.Verbs()) {
+                        if ($verb.Name -match "taskbar|任务栏|锁定到任务栏") {
+                            $verb.DoIt()
+                            $pinned = $true
+                            break
+                        }
+                    }
+                }
+                if ($pinned) { break }
+            }
+        }
+    } catch {}
+}
+
+if ($pinned) {
+    Write-Output "SUCCESS"
+} else {
+    Write-Output "DONE"
+}
+`, cleanExePath)
+
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow: true,
+	}
+
+	out, err := cmd.CombinedOutput()
+	outputStr := string(out)
+	if err != nil {
+		logger.Warnf("[DeskNotify] 固定任务栏脚本执行: %v (输出: %s)", err, outputStr)
+		return nil
+	}
+	logger.Infof("[DeskNotify] 固定任务栏执行结果: %s", outputStr)
 	return nil
 }

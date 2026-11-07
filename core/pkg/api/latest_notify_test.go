@@ -263,3 +263,47 @@ func TestBroadcastNotificationWithRecentList(t *testing.T) {
 		t.Fatalf("unexpected order or content of notifications in broadcast: %+v", payload.Notifications)
 	}
 }
+
+func TestPinTaskbarEndpoint(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "desk_notify_pin_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfgMgr, err := config.NewManagerWithDir(tempDir)
+	if err != nil {
+		t.Fatalf("failed to init config manager: %v", err)
+	}
+	store, err := db.NewStore(tempDir)
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer store.Close()
+
+	srv := NewServer(cfgMgr, store, storage.NewStorage(tempDir), tunnel.NewMockTunnel(), desktop.NewManager(), nil)
+
+	// GET method should be rejected
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/window/pin-taskbar", nil)
+	recGet := httptest.NewRecorder()
+	srv.handlePinTaskbar(recGet, reqGet)
+	if recGet.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 Method Not Allowed for GET, got %d", recGet.Code)
+	}
+
+	// POST method should succeed
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/window/pin-taskbar", nil)
+	recPost := httptest.NewRecorder()
+	srv.handlePinTaskbar(recPost, reqPost)
+	if recPost.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for POST, got %d", recPost.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(recPost.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+	if resp["ok"] != true {
+		t.Fatalf("expected ok=true, got %+v", resp)
+	}
+}

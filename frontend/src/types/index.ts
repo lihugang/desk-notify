@@ -34,6 +34,7 @@ export interface AppConfig {
   lanAuthRequired: boolean;
   soundEnabled: boolean;
   customSound?: string;
+  fontSize?: string;
   autoStart: boolean;
   firstRunDone?: boolean;
   documentsDir?: string;

@@ -32,7 +32,8 @@ func (m *headlessManager) Run(cfgMgr *config.Manager) error {
 	signal.Notify(m.sigChan, os.Interrupt, syscall.SIGTERM)
 	logger.Infof("[DeskNotify] 运行在 Web Server 渲染模式 (测试/开发环境)")
 	if cfgMgr.IsFirstRun() {
-		logger.Infof("[DeskNotify] 首次启动应用，自动弹出设置页: http://localhost:%d/settings", cfgMgr.Get().Port)
+		logger.Infof("[DeskNotify] 首次启动应用，自动固定到任务栏并弹出设置页: http://localhost:%d/settings", cfgMgr.Get().Port)
+		_ = m.PinToTaskbar()
 		m.OpenSettings()
 		_ = cfgMgr.MarkFirstRunComplete()
 	}
@@ -111,6 +112,11 @@ func (m *headlessManager) OpenFile(filePath string) error {
 
 func (m *headlessManager) RevealFile(filePath string) error {
 	return revealFile(filePath)
+}
+
+func (m *headlessManager) PinToTaskbar() error {
+	logger.Infof("[DeskNotify] 固定到任务栏: 非 Windows 系统环境跳过")
+	return nil
 }
 
 func (m *headlessManager) Quit() {

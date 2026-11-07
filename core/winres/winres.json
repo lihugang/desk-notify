@@ -18,7 +18,7 @@
           "name": "com.lihugang.desknotify",
           "version": "1.0.0.0"
         },
-        "description": "DeskNotify 班级桌面通知投递系统",
+        "description": "DeskNotify 传纸条",
         "minimum-os": "win7",
         "execution-level": "as invoker",
         "ui-access": false,
@@ -46,7 +46,17 @@
         "info": {
           "0804": {
             "CompanyName": "DeskNotify",
-            "FileDescription": "DeskNotify 班级桌面通知投递系统",
+            "FileDescription": "DeskNotify 传纸条",
+            "FileVersion": "1.0.0.0",
+            "InternalName": "DeskNotify.exe",
+            "LegalCopyright": "Copyright (C) 2026 lihugang",
+            "OriginalFilename": "DeskNotify.exe",
+            "ProductName": "传纸条",
+            "ProductVersion": "1.0.0.0"
+          },
+          "0409": {
+            "CompanyName": "DeskNotify",
+            "FileDescription": "DeskNotify 传纸条",
             "FileVersion": "1.0.0.0",
             "InternalName": "DeskNotify.exe",
             "LegalCopyright": "Copyright (C) 2026 lihugang",

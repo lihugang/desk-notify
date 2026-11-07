@@ -111,6 +111,7 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 	mux.HandleFunc("/api/open-archive-dir", s.handleOpenArchiveDir)
 	mux.HandleFunc("/api/logs/open", s.handleOpenLogsDir)
 	mux.HandleFunc("/api/open-logs-dir", s.handleOpenLogsDir)
+	mux.HandleFunc("/api/window/pin-taskbar", s.handlePinTaskbar)
 	mux.HandleFunc("/ws", s.handleWS)
 
 	// Root CA Certificate download endpoints
@@ -258,6 +259,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"lanAuthRequired":   cfg.LanAuthRequired,
 			"soundEnabled":      cfg.SoundEnabled,
 			"customSound":       cfg.CustomSound,
+			"fontSize":          cfg.FontSize,
 			"autoStart":         cfg.AutoStart,
 			"firstRunDone":      cfg.FirstRunDone,
 			"frp":               cfg.FRP,
@@ -281,6 +283,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			ClassName         *string           `json:"className"`
 			SoundEnabled      *bool             `json:"soundEnabled"`
 			CustomSound       *string           `json:"customSound"`
+			FontSize          *string           `json:"fontSize"`
 			AutoStart         *bool             `json:"autoStart"`
 			LanAuthRequired   *bool             `json:"lanAuthRequired"`
 			NewPassword       *string           `json:"newPassword"`
@@ -304,6 +307,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.CustomSound != nil {
 			cfg.CustomSound = *req.CustomSound
+		}
+		if req.FontSize != nil && *req.FontSize != "" {
+			cfg.FontSize = *req.FontSize
 		}
 		if req.AutoStart != nil {
 			cfg.AutoStart = *req.AutoStart
@@ -367,6 +373,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		logger.Infof("[Config] 系统配置已更新并保存 (班级: %s, 端口: %d, 来源: %s)", cfg.ClassName, cfg.Port, r.RemoteAddr)
+		s.broadcastConfig(cfg)
 
 		// Hot reload tunnel / FRP whenever FRP config or security parameters are saved
 		if frpChanged || (isAdmin && (req.FRP != nil || req.LanAuthRequired != nil || newPasswordVal != "")) {
@@ -526,6 +533,7 @@ func (s *Server) handleLatestNotify(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"hasNotification": false,
 			"className":       cfg.ClassName,
+			"fontSize":        cfg.FontSize,
 			"notifications":   []*db.Notification{},
 		})
 		return
@@ -539,6 +547,7 @@ func (s *Server) handleLatestNotify(w http.ResponseWriter, r *http.Request) {
 		Notifications   []*db.Notification `json:"notifications"`
 		SoundEnabled    bool               `json:"soundEnabled"`
 		SoundURL        string             `json:"soundUrl"`
+		FontSize        string             `json:"fontSize,omitempty"`
 	}
 
 	resp := latestResponse{
@@ -548,6 +557,7 @@ func (s *Server) handleLatestNotify(w http.ResponseWriter, r *http.Request) {
 		Notifications:   list,
 		SoundEnabled:    cfg.SoundEnabled,
 		SoundURL:        fmt.Sprintf("/api/sound/current?t=%d", time.Now().UnixMilli()),
+		FontSize:        cfg.FontSize,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1019,17 +1029,40 @@ func (s *Server) broadcastNotification(n *db.Notification) {
 		recent = []*db.Notification{n}
 	}
 
-	// Broadcast notification enriched with sound configuration and recent 90-min list
+	// Broadcast notification enriched with sound configuration, font size and recent 90-min list
 	msg := struct {
 		*db.Notification
 		SoundEnabled  bool               `json:"soundEnabled"`
 		SoundURL      string             `json:"soundUrl"`
 		Notifications []*db.Notification `json:"notifications"`
+		FontSize      string             `json:"fontSize,omitempty"`
 	}{
 		Notification:  n,
 		SoundEnabled:  cfg.SoundEnabled,
 		SoundURL:      fmt.Sprintf("/api/sound/current?t=%d", time.Now().UnixMilli()),
 		Notifications: recent,
+		FontSize:      cfg.FontSize,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	for client := range s.clients {
+		_ = client.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+func (s *Server) broadcastConfig(cfg config.AppConfig) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	msg := map[string]interface{}{
+		"type":         "config",
+		"className":    cfg.ClassName,
+		"fontSize":     cfg.FontSize,
+		"soundEnabled": cfg.SoundEnabled,
 	}
 
 	data, err := json.Marshal(msg)
@@ -1215,6 +1248,20 @@ func (s *Server) handleSettingsShow(w http.ResponseWriter, r *http.Request) {
 		s.desktop.OpenSettings()
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handlePinTaskbar(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.desktop != nil {
+		go func() {
+			_ = s.desktop.PinToTaskbar()
+		}()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }
 
 func (s *Server) handleHistoryHide(w http.ResponseWriter, r *http.Request) {

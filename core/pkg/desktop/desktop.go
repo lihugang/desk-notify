@@ -20,6 +20,7 @@ type Manager interface {
 	OpenLogsDir() error
 	OpenFile(filePath string) error
 	RevealFile(filePath string) error
+	PinToTaskbar() error
 	Quit()
 }
 

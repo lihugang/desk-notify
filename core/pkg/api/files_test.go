@@ -44,6 +44,7 @@ func (m *mockDesktopManager) RevealFile(filePath string) error {
 	m.revealedFile = filePath
 	return nil
 }
+func (m *mockDesktopManager) PinToTaskbar() error { return nil }
 func (m *mockDesktopManager) Quit() {}
 
 func TestFileOpenAndReveal(t *testing.T) {

@@ -32,6 +32,7 @@ type AppConfig struct {
 	LanAuthRequired    bool      `json:"lanAuthRequired"`
 	SoundEnabled       bool      `json:"soundEnabled"`
 	CustomSound        string    `json:"customSound"`
+	FontSize           string    `json:"fontSize,omitempty"`
 	AutoStart          bool      `json:"autoStart"`
 	FirstRunDone       bool      `json:"firstRunDone"`
 	FRP                FRPConfig `json:"frp"`
@@ -84,6 +85,7 @@ func DefaultConfig() AppConfig {
 		LanAuthRequired:    false,
 		SoundEnabled:       true,
 		CustomSound:        "",
+		FontSize:           "16px",
 		AutoStart:          true,
 		FirstRunDone:       false,
 		FRP: FRPConfig{
@@ -178,6 +180,10 @@ func NewManagerWithDir(dataDir string) (*Manager, error) {
 			mgr.isFirstRun = true
 		}
 		modified := false
+		if mgr.cfg.FontSize == "" {
+			mgr.cfg.FontSize = "16px"
+			modified = true
+		}
 		if mgr.cfg.ClassName == "三年二班" || mgr.cfg.ClassName == "" {
 			mgr.cfg.ClassName = "2907"
 			modified = true

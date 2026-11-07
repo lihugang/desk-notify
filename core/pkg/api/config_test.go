@@ -89,10 +89,12 @@ func TestAdminVerifyAndTwoTierConfig(t *testing.T) {
 		t.Fatalf("expected 403 Forbidden without admin token, got %d", wUnauth.Result().StatusCode)
 	}
 
-	// 3. Modify Level 1 setting (className) WITHOUT admin token -> should succeed
+	// 3. Modify Level 1 setting (className & fontSize) WITHOUT admin token -> should succeed
 	newClassName := "2907"
+	newFontSize := "22px"
 	level1Body, _ := json.Marshal(map[string]interface{}{
 		"className": newClassName,
+		"fontSize":  newFontSize,
 	})
 	reqL1 := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader(level1Body))
 	reqL1.RemoteAddr = "127.0.0.1:1234"
@@ -103,6 +105,9 @@ func TestAdminVerifyAndTwoTierConfig(t *testing.T) {
 	}
 	if cfgMgr.Get().ClassName != "2907" {
 		t.Fatalf("expected className to be 2907, got %s", cfgMgr.Get().ClassName)
+	}
+	if cfgMgr.Get().FontSize != "22px" {
+		t.Fatalf("expected fontSize to be 22px, got %s", cfgMgr.Get().FontSize)
 	}
 
 	// 4. Modify Level 2 setting (FRP, lanAuthRequired & PublicPassword) WITH admin token -> should succeed

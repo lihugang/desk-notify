@@ -25,7 +25,7 @@ func main() {
 	defer logger.Close()
 
 	logger.Infof("==================================================")
-	logger.Infof("       DeskNotify 班级桌面通知投递系统            ")
+	logger.Infof("                DeskNotify 传纸条                 ")
 	logger.Infof("==================================================")
 	logger.Infof("[DeskNotify] 运行日志目录: %s", logsDir)
 

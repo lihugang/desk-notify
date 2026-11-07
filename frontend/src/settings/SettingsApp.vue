@@ -5,7 +5,7 @@
       <div class="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between select-none">
         <div class="flex items-center gap-2">
           <div class="w-3 h-3 rounded-full bg-blue-500"></div>
-          <span class="text-xs font-bold text-slate-700 tracking-wide">DeskNotify · 班级设置与扫码</span>
+          <span class="text-xs font-bold text-slate-700 tracking-wide">传纸条 · 班级设置与扫码</span>
           <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-semibold">
             {{ config.className || '2907' }}
           </span>
@@ -21,21 +21,33 @@
       </div>
 
       <!-- First Run Welcome Banner -->
-      <div v-if="isFirstRun" class="mx-5 sm:mx-6 mt-4 p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs text-blue-900 shadow-2xs">
+      <div v-if="isFirstRun" class="mx-5 sm:mx-6 mt-4 p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs text-blue-900 shadow-2xs gap-3">
         <div class="flex items-center gap-2.5">
           <Sparkles class="w-4 h-4 text-blue-600 flex-shrink-0" />
           <div>
-            <span class="font-bold">欢迎使用 DeskNotify 班级通知系统！</span>
-            <span class="text-blue-700 ml-1">首次打开已自动为您展开配置与投递二维码。确认班级名称后关闭窗口，软件将常驻右下角托盘静默运行。</span>
+            <span class="font-bold">欢迎使用 DeskNotify 传纸条！</span>
+            <span class="text-blue-700 ml-1">首次打开已自动固定到底部任务栏并展开投递二维码。确认班级名称后关闭窗口，软件将常驻右下角托盘静默运行。</span>
           </div>
         </div>
-        <button
-          @click="isFirstRun = false"
-          class="text-blue-400 hover:text-blue-600 p-1 rounded-md transition"
-          title="关闭提示"
-        >
-          <X class="w-3.5 h-3.5" />
-        </button>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <button
+            type="button"
+            @click="pinToTaskbar"
+            :disabled="pinningTaskbar"
+            class="px-2.5 py-1 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium transition shadow-2xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            title="固定到任务栏"
+          >
+            <Pin class="w-3.5 h-3.5 text-blue-600" />
+            <span>{{ pinningTaskbar ? '正在固定...' : '固定到任务栏' }}</span>
+          </button>
+          <button
+            @click="isFirstRun = false"
+            class="text-blue-400 hover:text-blue-600 p-1 rounded-md transition"
+            title="关闭提示"
+          >
+            <X class="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       <!-- Main Navigation Tabs -->
@@ -136,7 +148,7 @@
         <!-- Root CA Certificate Info & Download -->
         <div class="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3.5 flex items-center justify-between text-xs">
           <div class="space-y-0.5">
-            <p class="font-semibold text-indigo-900">安装 DeskNotify 根证书 (HTTPS)</p>
+            <p class="font-semibold text-indigo-900">安装传纸条根证书 (HTTPS)</p>
             <p class="text-[11px] text-indigo-600/80">手机/电脑导入证书可消除浏览器不安全警告，并支持 PWA 桌面独立快捷方式</p>
           </div>
           <a
@@ -160,6 +172,93 @@
             placeholder="如：2907"
           />
           <p class="text-[11px] text-slate-400 mt-1">显示在通知窗口头部及教师投递页面标题</p>
+        </div>
+
+        <!-- Notification Font Size Adjustment Section -->
+        <div class="pt-2 border-t border-slate-100 space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-xs font-semibold text-slate-700">通知卡片正文字号</span>
+              <p class="text-[11px] text-slate-400 mt-0.5">调整教室大屏通知卡片的文字大小，方便远距离与后排同学清晰阅读</p>
+            </div>
+            <span class="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-mono text-xs font-semibold">
+              {{ currentFontSizeNumber }}px
+            </span>
+          </div>
+
+          <div class="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+            <!-- Preset Buttons -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button
+                v-for="item in fontSizePresets"
+                :key="item.value"
+                type="button"
+                @click="setFontSize(item.value)"
+                :class="currentFontSizeNumber === item.size ? 'bg-blue-50 border-blue-500 text-blue-700 font-semibold ring-1 ring-blue-400 shadow-2xs' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100/80'"
+                class="py-2 px-2.5 text-xs rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 cursor-pointer"
+              >
+                <span class="font-bold">{{ item.label }}</span>
+                <span class="text-[10px] text-slate-400 font-normal">{{ item.desc }} ({{ item.size }}px)</span>
+              </button>
+            </div>
+
+            <!-- Fine-tuning Slider & Quick Steppers -->
+            <div class="bg-white p-3 rounded-lg border border-slate-200/80 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-slate-500 font-medium flex items-center gap-1.5">
+                  <Type class="w-3.5 h-3.5 text-blue-600" />
+                  <span>精细滑块调节 (14px - 32px)</span>
+                </span>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    @click="stepFontSize(-1)"
+                    :disabled="currentFontSizeNumber <= 14"
+                    class="w-6 h-6 rounded flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-40 transition text-xs font-bold cursor-pointer"
+                    title="缩小 1px"
+                  >
+                    -
+                  </button>
+                  <span class="font-mono font-semibold text-slate-800 text-xs px-2">{{ currentFontSizeNumber }}px</span>
+                  <button
+                    type="button"
+                    @click="stepFontSize(1)"
+                    :disabled="currentFontSizeNumber >= 32"
+                    class="w-6 h-6 rounded flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-40 transition text-xs font-bold cursor-pointer"
+                    title="放大 1px"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <input
+                type="range"
+                min="14"
+                max="32"
+                step="1"
+                :value="currentFontSizeNumber"
+                @input="handleSliderChange"
+                class="w-full accent-blue-600 cursor-pointer"
+              />
+            </div>
+
+            <!-- Live Preview Box -->
+            <div class="bg-white p-3.5 rounded-lg border border-slate-200/80 space-y-1.5">
+              <div class="flex items-center justify-between text-[11px] text-slate-400 pb-1 border-b border-slate-100">
+                <span class="font-medium text-slate-500 flex items-center gap-1">
+                  <Eye class="w-3 h-3 text-slate-400" />
+                  <span>实时效果预览</span>
+                </span>
+                <span>当前应用：{{ currentFontSizeNumber }}px</span>
+              </div>
+              <div
+                class="markdown-content text-slate-800 leading-relaxed transition-all"
+                :style="{ fontSize: currentFontSizeNumber + 'px' }"
+              >
+                <p><strong>【班级通知】</strong> 今天下午第三节课在多媒体教室开会，请各组组长带好笔记本和课件准时参加。</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Notification Sound Settings Section -->
@@ -371,6 +470,25 @@
                 <span>复制路径</span>
               </button>
             </div>
+          </div>
+        </div>
+
+        <!-- Pin to Taskbar Section -->
+        <div class="pt-3 border-t border-slate-100 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-xs font-semibold text-slate-700">底部任务栏快捷方式</span>
+              <p class="text-[11px] text-slate-400 mt-0.5">将 DeskNotify 固定到 Windows 底部任务栏，方便随时唤出通知或重新启动</p>
+            </div>
+            <button
+              type="button"
+              @click="pinToTaskbar"
+              :disabled="pinningTaskbar"
+              class="px-3 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
+            >
+              <Pin class="w-3.5 h-3.5 text-blue-600" />
+              <span>{{ pinningTaskbar ? '正在固定...' : '固定到底部任务栏' }}</span>
+            </button>
           </div>
         </div>
 
@@ -614,7 +732,9 @@ import {
   Sparkles,
   Folder,
   FolderOpen,
-  FileText
+  FileText,
+  Type,
+  Pin
 } from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import type { AppConfig } from '../types';
@@ -664,6 +784,13 @@ const presets = [
   { id: 'chime.mp3', label: '空灵旋律', desc: '舒缓悠扬' },
 ];
 
+const fontSizePresets = [
+  { value: '16px', size: 16, label: '标准', desc: '默认推荐' },
+  { value: '18px', size: 18, label: '较大', desc: '中等教室' },
+  { value: '22px', size: 22, label: '特大', desc: '宽敞大班' },
+  { value: '26px', size: 26, label: '超大', desc: '阶梯教室' },
+];
+
 const config = ref<AppConfig>({
   className: '2907',
   port: 8920,
@@ -672,6 +799,7 @@ const config = ref<AppConfig>({
   lanAuthRequired: false,
   soundEnabled: true,
   customSound: '',
+  fontSize: '16px',
   autoStart: true,
   frp: {
     enabled: true,
@@ -681,6 +809,40 @@ const config = ref<AppConfig>({
     remotePort: 28932
   }
 });
+
+const currentFontSizeNumber = computed(() => {
+  const raw = config.value.fontSize || '16px';
+  const num = parseInt(raw, 10);
+  return isNaN(num) ? 16 : num;
+});
+
+function notifyFontSizeChange(size: string) {
+  try {
+    localStorage.setItem('desknotify_font_size', size);
+    if (typeof BroadcastChannel !== 'undefined') {
+      const channel = new BroadcastChannel('desknotify_font_channel');
+      channel.postMessage({ fontSize: size });
+      channel.close();
+    }
+  } catch {}
+}
+
+function setFontSize(val: string) {
+  config.value.fontSize = val;
+  notifyFontSizeChange(val);
+}
+
+function stepFontSize(delta: number) {
+  const next = Math.max(14, Math.min(32, currentFontSizeNumber.value + delta));
+  setFontSize(`${next}px`);
+}
+
+function handleSliderChange(e: Event) {
+  const val = Number((e.target as HTMLInputElement).value);
+  if (!isNaN(val)) {
+    setFontSize(`${val}px`);
+  }
+}
 
 // Addresses computation following the 192 rule and FRP inclusion
 const displayAddresses = computed<AddressItem[]>(() => {
@@ -792,6 +954,9 @@ async function fetchStatusAndConfig() {
     if (res.ok) {
       const data = await res.json();
       config.value = data.config;
+      if (config.value.fontSize) {
+        notifyFontSizeChange(config.value.fontSize);
+      }
       if (data.isFirstRun) {
         isFirstRun.value = true;
       }
@@ -871,10 +1036,12 @@ async function saveBasicConfig() {
         className: config.value.className,
         soundEnabled: config.value.soundEnabled,
         customSound: config.value.customSound,
+        fontSize: config.value.fontSize || '16px',
         autoStart: config.value.autoStart
       })
     });
     if (res.ok) {
+      notifyFontSizeChange(config.value.fontSize || '16px');
       alert('基础设置已成功保存！');
     } else {
       alert('保存失败，请检查服务状态');
@@ -1134,5 +1301,22 @@ function copyLogsDir() {
   }).catch(() => {
     alert(`请复制路径：${dir}`);
   });
+}
+
+const pinningTaskbar = ref(false);
+
+async function pinToTaskbar() {
+  pinningTaskbar.value = true;
+  try {
+    const res = await fetch('/api/window/pin-taskbar', { method: 'POST' });
+    if (!res.ok) {
+      throw new Error(`状态码 ${res.status}`);
+    }
+    alert('已成功触发将 DeskNotify 固定到底部任务栏');
+  } catch (err: any) {
+    alert(`固定到任务栏请求失败：${err.message || '系统错误'}`);
+  } finally {
+    pinningTaskbar.value = false;
+  }
 }
 </script>
