@@ -136,15 +136,9 @@
 
         <!-- Editor Footer & Submit -->
         <div class="bg-slate-50/80 border-t border-slate-200 px-4 py-3 flex items-center justify-between">
-          <div class="text-xs text-slate-500 flex items-center gap-1">
-            <Clock class="w-3.5 h-3.5" />
-            <span>自动隐去:</span>
-            <select v-model="duration" class="bg-white border border-slate-200 rounded px-1.5 py-0.5 text-xs">
-              <option :value="15">15秒</option>
-              <option :value="30">30秒</option>
-              <option :value="60">1分钟</option>
-              <option :value="0">直到手动关闭</option>
-            </select>
+          <div class="text-xs text-slate-400 flex items-center gap-1.5">
+            <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>桌面置顶卡片（需手动点击关闭）</span>
           </div>
 
           <button
@@ -158,33 +152,10 @@
         </div>
       </div>
 
-      <!-- Delivery History -->
-      <div v-if="history && history.length > 0" class="space-y-3">
-        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider px-1">最近投递历史</h3>
-        <div class="space-y-2">
-          <div
-            v-for="item in history"
-            :key="item.id"
-            class="bg-white rounded-xl p-3.5 border border-slate-200 shadow-xs flex flex-col space-y-1.5"
-          >
-            <div class="flex items-center justify-between text-xs text-slate-500">
-              <span class="font-medium text-slate-700">{{ formatTime(item.createdAt) }}</span>
-              <span class="px-2 py-0.5 rounded text-[11px]" :class="getLevelBadge(item.level)">
-                {{ getLevelLabel(item.level) }}
-              </span>
-            </div>
-            <p class="text-sm text-slate-800 line-clamp-2 leading-snug">{{ item.content }}</p>
-            <div v-if="(item.attachments && item.attachments.length > 0) || (item.images && item.images.length > 0)" class="flex items-center gap-3 text-xs text-slate-400 pt-1">
-              <span v-if="item.images && item.images.length > 0" class="flex items-center gap-1">
-                <ImageIcon class="w-3.5 h-3.5" /> {{ item.images.length }} 张图片
-              </span>
-              <span v-if="item.attachments && item.attachments.length > 0" class="flex items-center gap-1">
-                <Paperclip class="w-3.5 h-3.5" /> {{ item.attachments.length }} 个附件
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- Delivery History with Infinite Scroll & Full Details -->
+      <section v-if="authenticated" class="mt-8 pt-4 border-t border-slate-200">
+        <HistoryList ref="historyListRef" title="投递历史记录" :page-size="10" />
+      </section>
     </main>
   </div>
 </template>
@@ -193,9 +164,9 @@
 import { ref, onMounted } from 'vue';
 import {
   Bell, Lock, Bold, Italic, Heading2, List, Quote,
-  ImageIcon, Paperclip, Send, Clock, X, FileText
+  ImageIcon, Paperclip, Send, X, FileText
 } from 'lucide-vue-next';
-import type { NotificationMessage } from '../types';
+import HistoryList from '../components/HistoryList.vue';
 
 interface UploadItem {
   file: File;
@@ -214,16 +185,15 @@ const loggingIn = ref(false);
 
 const textContent = ref('');
 const messageLevel = ref<'info' | 'important' | 'urgent'>('info');
-const duration = ref(30);
+const duration = ref(0);
 const images = ref<UploadItem[]>([]);
 const attachments = ref<UploadItem[]>([]);
 const submitting = ref(false);
-const history = ref<NotificationMessage[]>([]);
+const historyListRef = ref<InstanceType<typeof HistoryList> | null>(null);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
 onMounted(() => {
   checkAuthAndStatus();
-  fetchHistory();
 });
 
 async function checkAuthAndStatus() {
@@ -256,7 +226,7 @@ async function handleLogin() {
     if (res.ok) {
       authenticated.value = true;
       authRequired.value = false;
-      fetchHistory();
+      historyListRef.value?.reload();
     } else {
       authError.value = '口令错误，请重新输入';
     }
@@ -264,18 +234,6 @@ async function handleLogin() {
     authError.value = '网络错误，请稍后再试';
   } finally {
     loggingIn.value = false;
-  }
-}
-
-async function fetchHistory() {
-  try {
-    const res = await fetch('/api/history');
-    if (res.ok) {
-      const data = await res.json();
-      history.value = Array.isArray(data) ? data : [];
-    }
-  } catch (e) {
-    console.warn('获取历史记录失败', e);
   }
 }
 
@@ -377,7 +335,7 @@ async function handleSubmit() {
       textContent.value = '';
       images.value = [];
       attachments.value = [];
-      fetchHistory();
+      historyListRef.value?.reload();
       alert('已成功投递到班级大屏！');
     } else {
       alert('投递失败，请重试');
@@ -393,27 +351,5 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-}
-
-function formatTime(iso: string): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-}
-
-function getLevelBadge(level: string): string {
-  switch (level) {
-    case 'urgent': return 'bg-red-100 text-red-700';
-    case 'important': return 'bg-amber-100 text-amber-700';
-    default: return 'bg-blue-100 text-blue-700';
-  }
-}
-
-function getLevelLabel(level: string): string {
-  switch (level) {
-    case 'urgent': return '紧急';
-    case 'important': return '重要';
-    default: return '普通';
-  }
 }
 </script>

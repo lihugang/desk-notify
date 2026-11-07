@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -66,6 +67,10 @@ func NewServer(
 }
 
 func (s *Server) Start() error {
+	return s.StartWithReady(nil)
+}
+
+func (s *Server) StartWithReady(ready chan<- struct{}) error {
 	cfg := s.cfgMgr.Get()
 
 	// Start tunnel
@@ -83,6 +88,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/config/verify-admin", s.handleAdminVerify)
 	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/notify/latest", s.handleLatestNotify)
 	mux.HandleFunc("/api/notify", s.handleNotify)
 	mux.HandleFunc("/api/history", s.handleHistory)
 	mux.HandleFunc("/api/files/", s.handleFiles)
@@ -93,6 +99,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
 	mux.HandleFunc("/api/window/settings-hide", s.handleSettingsHide)
 	mux.HandleFunc("/api/window/settings-show", s.handleSettingsShow)
+	mux.HandleFunc("/api/window/history-hide", s.handleHistoryHide)
+	mux.HandleFunc("/api/window/history-show", s.handleHistoryShow)
+	mux.HandleFunc("/api/archive/open", s.handleOpenArchiveDir)
+	mux.HandleFunc("/api/open-archive-dir", s.handleOpenArchiveDir)
 	mux.HandleFunc("/ws", s.handleWS)
 
 	// Root CA Certificate download endpoints
@@ -114,6 +124,8 @@ func (s *Server) Start() error {
 				r.URL.Path = "/card.html"
 			} else if path == "/settings" || path == "/settings/" {
 				r.URL.Path = "/settings.html"
+			} else if path == "/history" || path == "/history/" {
+				r.URL.Path = "/history.html"
 			}
 			fileServer.ServeHTTP(w, r)
 		})
@@ -145,8 +157,16 @@ func (s *Server) Start() error {
 		fmt.Printf("[DeskNotify] 警告: 初始化 TLS 证书失败: %v\n", err)
 	}
 
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	if ready != nil {
+		close(ready)
+	}
+
 	fmt.Printf("[DeskNotify] HTTP Web server listening on %s\n", addr)
-	return s.httpServer.ListenAndServe()
+	return s.httpServer.Serve(ln)
 }
 
 func (s *Server) Stop() error {
@@ -206,11 +226,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"port":              cfg.Port,
 			"hasPublicPassword": cfg.PublicPasswordHash != "" || cfg.PublicPassword != "",
 			"lanAuthRequired":   cfg.LanAuthRequired,
-			"defaultDuration":   cfg.DefaultDuration,
 			"soundEnabled":      cfg.SoundEnabled,
 			"customSound":       cfg.CustomSound,
 			"autoStart":         cfg.AutoStart,
+			"firstRunDone":      cfg.FirstRunDone,
 			"frp":               cfg.FRP,
+			"documentsDir":      config.GetDocumentsDir(cfg.ClassName),
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -219,6 +240,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"lanIPs":       lanIPs,
 			"frpPublicUrl": frpUrl,
 			"frpEnabled":   cfg.FRP.Enabled,
+			"isFirstRun":   s.cfgMgr.IsFirstRun(),
 		})
 		return
 	}
@@ -226,10 +248,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var req struct {
 			ClassName         *string           `json:"className"`
-			DefaultDuration   *int              `json:"defaultDuration"`
 			SoundEnabled      *bool             `json:"soundEnabled"`
 			CustomSound       *string           `json:"customSound"`
 			AutoStart         *bool             `json:"autoStart"`
+			LanAuthRequired   *bool             `json:"lanAuthRequired"`
 			NewPublicPassword *string           `json:"newPublicPassword"`
 			NewAdminPassword  *string           `json:"newAdminPassword"`
 			FRP               *config.FRPConfig `json:"frp"`
@@ -245,9 +267,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if req.ClassName != nil {
 			cfg.ClassName = *req.ClassName
 		}
-		if req.DefaultDuration != nil {
-			cfg.DefaultDuration = *req.DefaultDuration
-		}
 		if req.SoundEnabled != nil {
 			cfg.SoundEnabled = *req.SoundEnabled
 		}
@@ -258,14 +277,19 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			cfg.AutoStart = *req.AutoStart
 		}
 
-		// Level 2: Advanced & FRP Parameters (Requires admin authentication)
+		// Level 2: Advanced & FRP & Security Parameters (Requires admin authentication)
 		frpChanged := false
 		if (req.NewPublicPassword != nil && *req.NewPublicPassword != "") ||
 			(req.NewAdminPassword != nil && *req.NewAdminPassword != "") ||
+			req.LanAuthRequired != nil ||
 			req.FRP != nil {
 			if !isAdmin {
-				http.Error(w, "修改公网投递口令或暴露服务到公网设置需要管理员密码", http.StatusForbidden)
+				http.Error(w, "修改安全与公网设置需要管理员密码", http.StatusForbidden)
 				return
+			}
+
+			if req.LanAuthRequired != nil {
+				cfg.LanAuthRequired = *req.LanAuthRequired
 			}
 
 			if req.NewPublicPassword != nil && *req.NewPublicPassword != "" {
@@ -301,6 +325,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		cfg.FirstRunDone = true
 		if err := s.cfgMgr.Save(cfg); err != nil {
 			http.Error(w, "Failed to save config", http.StatusInternalServerError)
 			return
@@ -417,6 +442,44 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "token": token})
 }
 
+func (s *Server) handleLatestNotify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cfg := s.cfgMgr.Get()
+	list, err := s.store.GetRecent(1)
+	if err != nil || len(list) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"hasNotification": false,
+			"className":       cfg.ClassName,
+		})
+		return
+	}
+
+	n := list[0]
+	type latestResponse struct {
+		HasNotification bool             `json:"hasNotification"`
+		ClassName       string           `json:"className"`
+		Notification    *db.Notification `json:"notification"`
+		SoundEnabled    bool             `json:"soundEnabled"`
+		SoundURL        string           `json:"soundUrl"`
+	}
+
+	resp := latestResponse{
+		HasNotification: true,
+		ClassName:       cfg.ClassName,
+		Notification:    n,
+		SoundEnabled:    cfg.SoundEnabled,
+		SoundURL:        fmt.Sprintf("/api/sound/current?t=%d", time.Now().UnixMilli()),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -440,11 +503,8 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	if level == "" {
 		level = "info"
 	}
-	durationStr := r.FormValue("duration")
-	duration, _ := strconv.Atoi(durationStr)
-	if duration <= 0 {
-		duration = cfg.DefaultDuration
-	}
+	// 弹窗卡片常驻置顶，需手动点击关闭 (duration = 0)
+	duration := 0
 
 	notifyID := uuid.New().String()
 	var attachments []*db.Attachment
@@ -558,7 +618,20 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := s.store.GetRecent(20)
+	limit := 10
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if val, err := strconv.Atoi(l); err == nil && val > 0 {
+			limit = val
+		}
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if val, err := strconv.Atoi(o); err == nil && val >= 0 {
+			offset = val
+		}
+	}
+
+	list, total, err := s.store.GetHistory(limit, offset)
 	if err != nil {
 		http.Error(w, "Failed to fetch history", http.StatusInternalServerError)
 		return
@@ -567,8 +640,24 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		list = make([]*db.Notification, 0)
 	}
 
+	hasMore := offset+len(list) < total
+
+	resp := struct {
+		Items   []*db.Notification `json:"items"`
+		Total   int                `json:"total"`
+		Limit   int                `json:"limit"`
+		Offset  int                `json:"offset"`
+		HasMore bool               `json:"hasMore"`
+	}{
+		Items:   list,
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+		HasMore: hasMore,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(list)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
@@ -594,7 +683,13 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	if att.MimeType != "" {
 		w.Header().Set("Content-Type", att.MimeType)
 	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", att.Name))
+
+	disposition := "inline"
+	if r.URL.Query().Get("download") == "1" || !att.IsImage {
+		disposition = "attachment"
+	}
+	encodedName := url.PathEscape(att.Name)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename=%q; filename*=UTF-8''%s`, disposition, att.Name, encodedName))
 	_, _ = io.Copy(w, f)
 }
 
@@ -793,6 +888,7 @@ func (s *Server) handleSettingsHide(w http.ResponseWriter, r *http.Request) {
 	if s.desktop != nil {
 		s.desktop.HideSettings()
 	}
+	_ = s.cfgMgr.MarkFirstRunComplete()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -801,6 +897,44 @@ func (s *Server) handleSettingsShow(w http.ResponseWriter, r *http.Request) {
 		s.desktop.OpenSettings()
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleHistoryHide(w http.ResponseWriter, r *http.Request) {
+	if s.desktop != nil {
+		s.desktop.HideHistory()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleHistoryShow(w http.ResponseWriter, r *http.Request) {
+	if s.desktop != nil {
+		s.desktop.OpenHistory()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleOpenArchiveDir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg := s.cfgMgr.Get()
+	if !auth.CheckAuth(r, cfg) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if s.desktop != nil {
+		if err := s.desktop.OpenArchiveDir(); err != nil {
+			fmt.Printf("[DeskNotify] 打开通知存档目录失败: %v\n", err)
+			http.Error(w, fmt.Sprintf("打开存档目录失败: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":           true,
+		"documentsDir": config.GetDocumentsDir(cfg.ClassName),
+	})
 }
 
 func getLocalIPs() []string {

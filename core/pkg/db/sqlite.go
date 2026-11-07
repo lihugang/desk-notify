@@ -126,19 +126,28 @@ func (s *Store) SaveNotification(n *Notification, atts []*Attachment) error {
 	return tx.Commit()
 }
 
-func (s *Store) GetRecent(limit int) ([]*Notification, error) {
+func (s *Store) GetHistory(limit, offset int) ([]*Notification, int, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM notifications`).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count notifications: %w", err)
 	}
 
 	rows, err := s.db.Query(`
 		SELECT id, content, level, duration, sender, created_at
 		FROM notifications
 		ORDER BY created_at DESC
-		LIMIT ?
-	`, limit)
+		LIMIT ? OFFSET ?
+	`, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -146,7 +155,7 @@ func (s *Store) GetRecent(limit int) ([]*Notification, error) {
 	for rows.Next() {
 		var n Notification
 		if err := rows.Scan(&n.ID, &n.Content, &n.Level, &n.Duration, &n.Sender, &n.CreatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		n.Images = make([]string, 0)
 		n.Attachments = make([]*Attachment, 0)
@@ -177,7 +186,12 @@ func (s *Store) GetRecent(limit int) ([]*Notification, error) {
 		attRows.Close()
 	}
 
-	return list, nil
+	return list, total, nil
+}
+
+func (s *Store) GetRecent(limit int) ([]*Notification, error) {
+	list, _, err := s.GetHistory(limit, 0)
+	return list, err
 }
 
 func (s *Store) GetAttachment(id string) (*Attachment, error) {

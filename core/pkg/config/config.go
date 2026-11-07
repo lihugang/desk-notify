@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,10 +29,10 @@ type AppConfig struct {
 	PublicPasswordHash string    `json:"publicPasswordHash,omitempty"`
 	AdminPasswordHash  string    `json:"adminPasswordHash,omitempty"`
 	LanAuthRequired    bool      `json:"lanAuthRequired"`
-	DefaultDuration    int       `json:"defaultDuration"`
 	SoundEnabled       bool      `json:"soundEnabled"`
 	CustomSound        string    `json:"customSound"`
 	AutoStart          bool      `json:"autoStart"`
+	FirstRunDone       bool      `json:"firstRunDone"`
 	FRP                FRPConfig `json:"frp"`
 }
 
@@ -40,6 +41,7 @@ type Manager struct {
 	cfg        AppConfig
 	configPath string
 	dataDir    string
+	isFirstRun bool
 }
 
 func hashBcrypt(password string) string {
@@ -63,12 +65,12 @@ func DefaultConfig() AppConfig {
 		PublicPasswordHash: hashBcrypt("123456"),
 		AdminPasswordHash:  hashBcrypt("123456"),
 		LanAuthRequired:    false,
-		DefaultDuration:    30,
 		SoundEnabled:       true,
 		CustomSound:        "",
 		AutoStart:          true,
+		FirstRunDone:       false,
 		FRP: FRPConfig{
-			Enabled:    false,
+			Enabled:    true,
 			ServerAddr: "frp.freefrp.net",
 			ServerPort: 7000,
 			Token:      "freefrp.net",
@@ -92,11 +94,23 @@ func GetDataDir() string {
 	return "./dev_data"
 }
 
+// SanitizeClassName sanitizes a class name for use in filesystem paths.
+func SanitizeClassName(name string) string {
+	invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	res := name
+	for _, c := range invalidChars {
+		res = strings.ReplaceAll(res, c, "_")
+	}
+	res = strings.TrimSpace(res)
+	if res == "" {
+		res = "班级通知"
+	}
+	return res
+}
+
 // GetDocumentsDir returns the Documents directory for archiving files.
 func GetDocumentsDir(className string) string {
-	if className == "" {
-		className = "班级通知"
-	}
+	className = SanitizeClassName(className)
 	if runtime.GOOS == "windows" {
 		userProfile := os.Getenv("USERPROFILE")
 		if userProfile != "" {
@@ -127,9 +141,13 @@ func NewManagerWithDir(dataDir string) (*Manager, error) {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		mgr.isFirstRun = true
 		_ = mgr.Save(mgr.cfg)
 	} else {
 		_ = mgr.Load()
+		if !mgr.cfg.FirstRunDone {
+			mgr.isFirstRun = true
+		}
 		modified := false
 		if mgr.cfg.ClassName == "三年二班" || mgr.cfg.ClassName == "" {
 			mgr.cfg.ClassName = "2907"
@@ -200,4 +218,21 @@ func (m *Manager) Save(cfg AppConfig) error {
 
 func (m *Manager) GetDataDir() string {
 	return m.dataDir
+}
+
+// IsFirstRun returns true if this is the first time the app is launched.
+func (m *Manager) IsFirstRun() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.isFirstRun
+}
+
+// MarkFirstRunComplete marks the first run as completed and persists this to configuration.
+func (m *Manager) MarkFirstRunComplete() error {
+	m.mu.Lock()
+	m.isFirstRun = false
+	m.cfg.FirstRunDone = true
+	cfg := m.cfg
+	m.mu.Unlock()
+	return m.Save(cfg)
 }

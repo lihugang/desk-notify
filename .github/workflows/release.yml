@@ -46,6 +46,13 @@ jobs:
           go mod tidy
           cd ../..
 
+      - name: Generate Windows Resources (Icon & Manifest)
+        run: |
+          go install github.com/tc-hib/go-winres@latest
+          cd core
+          go-winres make --arch amd64
+          cd ..
+
       - name: Build Windows Executable
         run: |
           mkdir -p build

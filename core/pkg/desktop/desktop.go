@@ -12,6 +12,9 @@ type Manager interface {
 	HideCard()
 	OpenSettings()
 	HideSettings()
+	OpenHistory()
+	HideHistory()
+	OpenArchiveDir() error
 	Quit()
 }
 

@@ -50,7 +50,8 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         card: resolve(__dirname, 'card.html'),
-        settings: resolve(__dirname, 'settings.html')
+        settings: resolve(__dirname, 'settings.html'),
+        history: resolve(__dirname, 'history.html')
       }
     }
   },

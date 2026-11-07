@@ -27,10 +27,11 @@ export interface AppConfig {
   newPublicPassword?: string;
   newAdminPassword?: string;
   lanAuthRequired: boolean;
-  defaultDuration: number;
   soundEnabled: boolean;
   customSound?: string;
   autoStart: boolean;
+  firstRunDone?: boolean;
+  documentsDir?: string;
   frp: {
     enabled: boolean;
     serverAddr: string;

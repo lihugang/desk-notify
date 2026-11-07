@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/lihugang/desk-notify/core/pkg/api"
 	"github.com/lihugang/desk-notify/core/pkg/cert"
@@ -58,15 +59,24 @@ func main() {
 
 	// 7. Start Web Server
 	srv := api.NewServer(cfgMgr, store, fileStorage, tun, desktopMgr, staticFS)
+	readyChan := make(chan struct{})
 	go func() {
-		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
+		if err := srv.StartWithReady(readyChan); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("[DeskNotify] HTTP server error: %v\n", err)
 		}
 	}()
 
+	// Ensure Web server is listening before desktop runtime creates webviews
+	select {
+	case <-readyChan:
+	case <-time.After(5 * time.Second):
+		fmt.Println("[DeskNotify] 警告: 等待 Web 服务启动超时，继续初始化桌面组件")
+	}
+
 	fmt.Printf("[DeskNotify] 教师投递端已启动，请访问: http://localhost:%d\n", cfg.Port)
 	fmt.Printf("[DeskNotify] 桌面通知卡片窗口已映射至: http://localhost:%d/card\n", cfg.Port)
 	fmt.Printf("[DeskNotify] 系统设置页面已映射至: http://localhost:%d/settings\n", cfg.Port)
+	fmt.Printf("[DeskNotify] 历史通知消息窗口已映射至: http://localhost:%d/history\n", cfg.Port)
 
 	// 8. Run Desktop Event Loop (Wails event loop on Windows, Signal wait on Linux/Dev)
 	if err := desktopMgr.Run(cfgMgr); err != nil {

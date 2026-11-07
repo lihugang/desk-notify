@@ -20,6 +20,24 @@
         </button>
       </div>
 
+      <!-- First Run Welcome Banner -->
+      <div v-if="isFirstRun" class="mx-5 sm:mx-6 mt-4 p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs text-blue-900 shadow-2xs">
+        <div class="flex items-center gap-2.5">
+          <Sparkles class="w-4 h-4 text-blue-600 flex-shrink-0" />
+          <div>
+            <span class="font-bold">欢迎使用 DeskNotify 班级通知系统！</span>
+            <span class="text-blue-700 ml-1">首次打开已自动为您展开配置与投递二维码。确认班级名称后关闭窗口，软件将常驻右下角托盘静默运行。</span>
+          </div>
+        </div>
+        <button
+          @click="isFirstRun = false"
+          class="text-blue-400 hover:text-blue-600 p-1 rounded-md transition"
+          title="关闭提示"
+        >
+          <X class="w-3.5 h-3.5" />
+        </button>
+      </div>
+
       <!-- Main Navigation Tabs -->
       <div class="flex border-b border-slate-200 bg-white">
         <button
@@ -29,6 +47,15 @@
         >
           <QrCode class="w-4 h-4" />
           <span>扫码投递 (手机端)</span>
+        </button>
+
+        <button
+          @click="activeTab = 'history'"
+          :class="activeTab === 'history' ? 'border-b-2 border-blue-600 text-blue-600 font-bold bg-blue-50/40' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'"
+          class="flex-1 py-3 text-xs sm:text-sm font-semibold text-center transition flex items-center justify-center gap-1.5"
+        >
+          <History class="w-4 h-4" />
+          <span>历史通知</span>
         </button>
 
         <button
@@ -50,6 +77,11 @@
           <span v-if="!isUnlocked" class="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-500 rounded">需口令</span>
           <span v-else class="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-700 rounded font-normal">已解锁</span>
         </button>
+      </div>
+
+      <!-- Tab: History Notifications Feed (Desktop Big Screen) -->
+      <div v-if="activeTab === 'history'" class="p-5 sm:p-6 space-y-4 max-h-[calc(100vh-140px)] overflow-y-auto">
+        <HistoryList title="班级全部历史通知" :page-size="10" />
       </div>
 
       <!-- Tab 1: QR Codes & Connection Addresses -->
@@ -142,19 +174,6 @@
             placeholder="如：2907"
           />
           <p class="text-[11px] text-slate-400 mt-1">显示在通知窗口头部及教师投递页面标题</p>
-        </div>
-
-        <!-- Notification Duration -->
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">通知默认展示时长 (秒)</label>
-          <input
-            v-model.number="config.defaultDuration"
-            type="number"
-            min="5"
-            max="3600"
-            class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            placeholder="30"
-          />
         </div>
 
         <!-- Notification Sound Settings Section -->
@@ -289,6 +308,46 @@
           </div>
         </div>
 
+        <!-- Notification Archive Directory Section -->
+        <div class="pt-3 border-t border-slate-100 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-xs font-semibold text-slate-700">通知与课件存档目录</span>
+              <p class="text-[11px] text-slate-400 mt-0.5">接收到的通知富文本、图片与课件文件会自动以只读硬链接保存在此文件夹中</p>
+            </div>
+          </div>
+
+          <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-2 flex-1 min-w-0">
+              <Folder class="w-4 h-4 text-blue-600 flex-shrink-0" />
+              <span class="text-xs font-mono text-slate-600 truncate select-all" :title="config.documentsDir">
+                {{ config.documentsDir || ('我的文档\\DeskNotify\\' + (config.className || '班级通知')) }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                @click="openArchiveDir"
+                :disabled="openingDir"
+                class="px-2.5 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs cursor-pointer disabled:opacity-60"
+                title="在资源管理器中打开此文件夹"
+              >
+                <FolderOpen class="w-3.5 h-3.5" />
+                <span>{{ openingDir ? '正在呼出...' : '打开通知存档目录' }}</span>
+              </button>
+              <button
+                type="button"
+                @click="copyArchiveDir"
+                class="px-2.5 py-1.5 text-xs bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                title="复制目录路径"
+              >
+                <Copy class="w-3.5 h-3.5" />
+                <span>复制路径</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div class="pt-3 flex justify-end">
           <button
             @click="saveBasicConfig"
@@ -375,7 +434,24 @@
             </p>
           </div>
 
-          <!-- Section 2: Expose Service to Public Network (Built-in FreeFRP) -->
+          <!-- Section 2: LAN Authentication Required -->
+          <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-xs font-semibold text-slate-800">局域网访问强制验证</span>
+                <p class="text-[11px] text-slate-400 mt-0.5">
+                  开启后，校园局域网内的教师扫码投递也必须输入投递口令；关闭时局域网内直接免密投递
+                </p>
+              </div>
+              <input
+                v-model="config.lanAuthRequired"
+                type="checkbox"
+                class="w-4 h-4 rounded text-blue-600 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <!-- Section 3: Expose Service to Public Network (Built-in FreeFRP) -->
           <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div class="flex items-center justify-between">
               <div>
@@ -507,6 +583,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import {
   QrCode,
   Settings,
+  History,
   Lock,
   Unlock,
   ShieldCheck,
@@ -517,10 +594,14 @@ import {
   Copy,
   X,
   Eye,
-  EyeOff
+  EyeOff,
+  Sparkles,
+  Folder,
+  FolderOpen
 } from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import type { AppConfig } from '../types';
+import HistoryList from '../components/HistoryList.vue';
 
 interface AddressItem {
   id: string;
@@ -531,10 +612,11 @@ interface AddressItem {
   desc: string;
 }
 
-const activeTab = ref<'qrcode' | 'basic' | 'security'>('qrcode');
+const activeTab = ref<'qrcode' | 'history' | 'basic' | 'security'>('qrcode');
 const lanIPs = ref<string[]>(['127.0.0.1']);
 const frpPublicUrl = ref('');
 const saving = ref(false);
+const isFirstRun = ref(false);
 
 // Level 2 Security state
 const isUnlocked = ref(false);
@@ -572,12 +654,11 @@ const config = ref<AppConfig>({
   port: 8920,
   hasPublicPassword: true,
   lanAuthRequired: false,
-  defaultDuration: 30,
   soundEnabled: true,
   customSound: '',
   autoStart: true,
   frp: {
-    enabled: false,
+    enabled: true,
     serverAddr: 'frp.freefrp.net',
     serverPort: 7000,
     token: 'freefrp.net',
@@ -661,6 +742,15 @@ watch(displayAddresses, () => {
 }, { deep: true });
 
 onMounted(async () => {
+  if (window.location.hash === '#history' || window.location.search.includes('tab=history')) {
+    activeTab.value = 'history';
+  }
+  window.addEventListener('hashchange', () => {
+    if (window.location.hash === '#history') {
+      activeTab.value = 'history';
+    }
+  });
+
   await fetchStatusAndConfig();
   nextTick(() => {
     for (const item of displayAddresses.value) {
@@ -682,6 +772,9 @@ async function fetchStatusAndConfig() {
     if (res.ok) {
       const data = await res.json();
       config.value = data.config;
+      if (data.isFirstRun) {
+        isFirstRun.value = true;
+      }
       lanIPs.value = data.lanIPs || ['127.0.0.1'];
       frpPublicUrl.value = data.frpPublicUrl || '';
       initSoundMode();
@@ -751,7 +844,6 @@ async function saveBasicConfig() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         className: config.value.className,
-        defaultDuration: config.value.defaultDuration,
         soundEnabled: config.value.soundEnabled,
         customSound: config.value.customSound,
         autoStart: config.value.autoStart
@@ -773,7 +865,8 @@ async function saveSecurityConfig() {
   saving.value = true;
   try {
     const payload: any = {
-      frp: config.value.frp
+      frp: config.value.frp,
+      lanAuthRequired: config.value.lanAuthRequired
     };
     if (newPublicPassword.value.trim()) {
       payload.newPublicPassword = newPublicPassword.value.trim();
@@ -951,5 +1044,36 @@ function previewSound() {
     isPlayingPreview.value = false;
     previewAudio = null;
   }
+}
+
+const openingDir = ref(false);
+
+async function openArchiveDir() {
+  openingDir.value = true;
+  try {
+    const res = await fetch('/api/archive/open', { method: 'POST' });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(errText || `打开失败 (${res.status})`);
+    }
+    const data = await res.json().catch(() => ({}));
+    if (data.documentsDir) {
+      config.value.documentsDir = data.documentsDir;
+    }
+    alert('已呼出系统资源管理器打开通知存档目录');
+  } catch (err: any) {
+    alert(`打开存档目录失败：${err.message || '系统错误'}`);
+  } finally {
+    openingDir.value = false;
+  }
+}
+
+function copyArchiveDir() {
+  const dir = config.value.documentsDir || `我的文档\\DeskNotify\\${config.value.className || '班级通知'}`;
+  navigator.clipboard.writeText(dir).then(() => {
+    alert(`通知存档目录路径已复制到剪贴板：\n${dir}`);
+  }).catch(() => {
+    alert(`请复制路径：${dir}`);
+  });
 }
 </script>
