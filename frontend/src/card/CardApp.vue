@@ -1,6 +1,6 @@
 <template>
   <div
-    v-if="notifications.length > 0 || viewMode === 'history'"
+    v-if="isCardVisible && (notifications.length > 0 || viewMode === 'history')"
     class="fixed inset-0 p-3 sm:p-5 flex flex-col justify-start items-center bg-transparent pointer-events-auto cursor-default"
     @click.self="handleBackdropClick"
   >
@@ -103,7 +103,7 @@
           class="bg-white/90 rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-2xs space-y-3"
           :class="item.pinned ? 'ring-1 ring-amber-400/40 bg-amber-50/20' : ''"
         >
-          <!-- Metadata Bar: Level, Time Point, Sender -->
+          <!-- Metadata Bar: Level & Time Point -->
           <div class="flex items-center justify-between text-xs pb-2 border-b border-slate-100/90 flex-wrap gap-2">
             <div class="flex items-center gap-2 flex-wrap">
               <span
@@ -113,21 +113,19 @@
                 <Pin v-if="item.pinned" class="w-3 h-3 text-amber-600" />
                 <span>{{ item.pinned ? '置顶提醒' : '班级通知' }}</span>
               </span>
+            </div>
 
-              <!-- Time Point Display clearly visible -->
+            <div class="flex items-center gap-2 flex-wrap">
+              <div v-if="idx === 0 && remainingSeconds > 0" class="flex items-center gap-1 text-xs font-mono bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+                <Clock class="w-3 h-3" />
+                <span>{{ remainingSeconds }}s 后自动关闭</span>
+              </div>
+
+              <!-- Time Point Display aligned right -->
               <span class="text-slate-600 font-mono text-[11px] font-medium flex items-center gap-1 bg-slate-50 border border-slate-200/80 px-2.5 py-0.5 rounded-md">
                 <Clock class="w-3 h-3 text-slate-400" />
                 <span>{{ formatExactTime(item.createdAt) }}</span>
               </span>
-
-              <span v-if="item.sender" class="text-slate-500 text-[11px] font-medium bg-slate-100 px-2 py-0.5 rounded-md">
-                {{ item.sender }}
-              </span>
-            </div>
-
-            <div v-if="idx === 0 && remainingSeconds > 0" class="flex items-center gap-1 text-xs font-mono bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
-              <Clock class="w-3 h-3" />
-              <span>{{ remainingSeconds }}s 后自动关闭</span>
             </div>
           </div>
 
@@ -209,7 +207,7 @@
 
   <!-- Empty State Card (When no notification exists) -->
   <div
-    v-else-if="showEmptyState"
+    v-else-if="isCardVisible && showEmptyState"
     class="fixed inset-0 p-3 sm:p-5 flex flex-col justify-start items-center bg-transparent pointer-events-auto cursor-default"
     @click.self="handleBackdropClick"
   >
@@ -317,6 +315,7 @@ const classroomName = ref('班级大屏');
 const remainingSeconds = ref(0);
 const viewMode = ref<'current' | 'history'>('current');
 const showEmptyState = ref(false);
+const isCardVisible = ref(false);
 const activeLightboxImage = ref<string | null>(null);
 let timer: any = null;
 
@@ -332,6 +331,54 @@ function handleWindowInteraction() {
 // Transparent backdrop click handler -> closes the card window
 function handleBackdropClick() {
   closeCard();
+}
+
+function pruneExpiredNotifications() {
+  const cutoff = Date.now() - 90 * 60 * 1000;
+  notifications.value = notifications.value.filter((item) => {
+    if (!item.createdAt) return true;
+    const t = new Date(item.createdAt).getTime();
+    return isNaN(t) || t >= cutoff;
+  });
+}
+
+function handleIncomingNotification(msg: any) {
+  viewMode.value = 'current';
+  showEmptyState.value = false;
+  isCardVisible.value = true;
+
+  // 1. If msg contains full 90-minute notifications list from backend WebSocket
+  if (msg.notifications && Array.isArray(msg.notifications) && msg.notifications.length > 0) {
+    notifications.value = msg.notifications.map((item: any) => ({
+      ...item,
+      soundEnabled: msg.soundEnabled,
+      soundUrl: msg.soundUrl,
+    }));
+  } else {
+    // 2. Prepend single notification and fetch recent 90-min list in background to sync
+    const exists = notifications.value.some((n) => n.id === msg.id);
+    if (!exists) {
+      notifications.value = [msg, ...notifications.value];
+    }
+    fetchLatestNotification(false);
+  }
+
+  pruneExpiredNotifications();
+
+  if (msg.soundEnabled !== false) {
+    playAlertSound(msg.soundUrl);
+  }
+
+  if (msg.duration > 0) {
+    remainingSeconds.value = msg.duration;
+    startCountdown();
+  } else {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    remainingSeconds.value = 0;
+  }
 }
 
 // Window header dragging
@@ -368,12 +415,20 @@ function handleResizeBottom(e: MouseEvent) {
 
 onMounted(() => {
   connectWebSocket();
-  fetchLatestNotification(false);
+  fetchLatestNotification(false).then(() => {
+    if (notifications.value.length > 0) {
+      isCardVisible.value = true;
+    }
+  });
 
   window.addEventListener('focus', () => {
     handleWindowInteraction();
     if (notifications.value.length === 0 && viewMode.value === 'current') {
-      fetchLatestNotification(false);
+      fetchLatestNotification(false).then(() => {
+        if (notifications.value.length > 0) {
+          isCardVisible.value = true;
+        }
+      });
     }
   });
 
@@ -385,12 +440,14 @@ function toggleViewMode() {
   if (viewMode.value === 'current') {
     viewMode.value = 'history';
     showEmptyState.value = false;
+    isCardVisible.value = true;
     if (timer) {
       clearInterval(timer);
       timer = null;
     }
   } else {
     viewMode.value = 'current';
+    isCardVisible.value = true;
     if (notifications.value.length === 0) {
       fetchLatestNotification(false);
     } else if (notifications.value[0]?.duration > 0 && remainingSeconds.value > 0) {
@@ -418,18 +475,17 @@ async function fetchLatestNotification(playSound: boolean = false) {
           soundEnabled: data.soundEnabled,
           soundUrl: data.soundUrl,
         }));
+        pruneExpiredNotifications();
         if (playSound && notifications.value[0]?.soundEnabled !== false) {
           playAlertSound(notifications.value[0]?.soundUrl);
         }
-        if (notifications.value[0]?.duration > 0) {
+        if (notifications.value[0]?.duration > 0 && remainingSeconds.value <= 0) {
           remainingSeconds.value = notifications.value[0].duration;
           startCountdown();
-        } else {
-          remainingSeconds.value = 0;
         }
       } else {
         notifications.value = [];
-        if (viewMode.value !== 'history') {
+        if (viewMode.value !== 'history' && isCardVisible.value) {
           showEmptyState.value = true;
         }
       }
@@ -440,28 +496,17 @@ async function fetchLatestNotification(playSound: boolean = false) {
 }
 
 // Expose handlers to Wails / window runtime
-(window as any).deskNotifyShowLatest = () => {
+(window as any).deskNotifyShowLatest = async () => {
   viewMode.value = 'current';
-  fetchLatestNotification(false);
+  isCardVisible.value = true;
+  await fetchLatestNotification(false);
+  if (notifications.value.length === 0) {
+    showEmptyState.value = true;
+  }
 };
 
 (window as any).deskNotifyShowMessage = (msg: NotificationMessage) => {
-  viewMode.value = 'current';
-  showEmptyState.value = false;
-  // Prepend new incoming message to notifications list
-  const exists = notifications.value.some((n) => n.id === msg.id);
-  if (!exists) {
-    notifications.value = [msg, ...notifications.value];
-  }
-  if (msg.soundEnabled !== false) {
-    playAlertSound(msg.soundUrl);
-  }
-  if (msg.duration > 0) {
-    remainingSeconds.value = msg.duration;
-    startCountdown();
-  } else {
-    remainingSeconds.value = 0;
-  }
+  handleIncomingNotification(msg);
 };
 
 function connectWebSocket() {
@@ -470,22 +515,8 @@ function connectWebSocket() {
 
   ws.onmessage = (event) => {
     try {
-      const msg: NotificationMessage = JSON.parse(event.data);
-      viewMode.value = 'current';
-      showEmptyState.value = false;
-      const exists = notifications.value.some((n) => n.id === msg.id);
-      if (!exists) {
-        notifications.value = [msg, ...notifications.value];
-      }
-      if (msg.soundEnabled !== false) {
-        playAlertSound(msg.soundUrl);
-      }
-      if (msg.duration > 0) {
-        remainingSeconds.value = msg.duration;
-        startCountdown();
-      } else {
-        remainingSeconds.value = 0;
-      }
+      const msg = JSON.parse(event.data);
+      handleIncomingNotification(msg);
     } catch (e) {
       console.error('解析推送消息失败', e);
     }
@@ -516,8 +547,11 @@ function minimizeCard() {
 
 function closeCard() {
   handleWindowInteraction();
-  if (timer) clearInterval(timer);
-  notifications.value = [];
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+  isCardVisible.value = false;
   showEmptyState.value = false;
   viewMode.value = 'current';
   if ((window as any).runtime?.WindowHide) {

@@ -1,16 +1,23 @@
+@import './fonts.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "CMU Sans Serif", "Noto Sans SC", "Noto Sans", "Noto Sans Serif", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+  text-autospace: normal;
+  text-spacing-trim: normal;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 body {
+  font-family: inherit;
   margin: 0;
   padding: 0;
+  text-autospace: normal;
+  text-spacing-trim: normal;
 }
 
 /* Enhanced Markdown Content Styling */

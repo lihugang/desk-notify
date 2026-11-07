@@ -13,6 +13,7 @@ import (
 
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
+	"github.com/lihugang/desk-notify/core/pkg/logger"
 )
 
 type headlessManager struct {
@@ -29,9 +30,9 @@ func newManager() Manager {
 func (m *headlessManager) Run(cfgMgr *config.Manager) error {
 	m.cfgMgr = cfgMgr
 	signal.Notify(m.sigChan, os.Interrupt, syscall.SIGTERM)
-	fmt.Println("[DeskNotify] 运行在 Web Server 渲染模式 (测试/开发环境)")
+	logger.Infof("[DeskNotify] 运行在 Web Server 渲染模式 (测试/开发环境)")
 	if cfgMgr.IsFirstRun() {
-		fmt.Printf("[DeskNotify] 首次启动应用，自动弹出设置页: http://localhost:%d/settings\n", cfgMgr.Get().Port)
+		logger.Infof("[DeskNotify] 首次启动应用，自动弹出设置页: http://localhost:%d/settings", cfgMgr.Get().Port)
 		m.OpenSettings()
 		_ = cfgMgr.MarkFirstRunComplete()
 	}
@@ -44,48 +45,48 @@ func (m *headlessManager) Notify(n *db.Notification) {
 	if n.Pinned {
 		pinnedText = "置顶强提醒 (抢走焦点)"
 	}
-	fmt.Printf("[DeskNotify 系统通知] 模式: %s, 内容: %.60s...\n", pinnedText, n.Content)
-	fmt.Printf("[DeskNotify 桌面弹窗] 窗口已打开 (测试环境请在浏览器中打开 /card 查看)\n")
+	logger.Infof("[DeskNotify 系统通知] 模式: %s, 内容: %.60s...", pinnedText, n.Content)
+	logger.Infof("[DeskNotify 桌面弹窗] 窗口已打开 (测试环境请在浏览器中打开 /card 查看)")
 }
 
 func (m *headlessManager) ShowCard() {
-	fmt.Println("[DeskNotify 桌面弹窗] 显示卡片窗口")
+	logger.Infof("[DeskNotify 桌面弹窗] 显示卡片窗口")
 }
 
 func (m *headlessManager) HideCard() {
-	fmt.Println("[DeskNotify 桌面弹窗] 隐藏卡片窗口")
+	logger.Infof("[DeskNotify 桌面弹窗] 隐藏卡片窗口")
 }
 
 func (m *headlessManager) MinimizeCard() {
-	fmt.Println("[DeskNotify 桌面弹窗] 最小化卡片窗口")
+	logger.Infof("[DeskNotify 桌面弹窗] 最小化卡片窗口")
 }
 
 func (m *headlessManager) StopFlash() {
-	fmt.Println("[DeskNotify 桌面弹窗] 停止任务栏闪烁")
+	logger.Infof("[DeskNotify 桌面弹窗] 停止任务栏闪烁")
 }
 
 func (m *headlessManager) OpenSettings() {
 	if m.cfgMgr != nil {
 		url := fmt.Sprintf("http://localhost:%d/settings", m.cfgMgr.Get().Port)
-		fmt.Printf("[DeskNotify] 请访问设置: %s\n", url)
+		logger.Infof("[DeskNotify] 请访问设置: %s", url)
 		openBrowser(url)
 	}
 }
 
 func (m *headlessManager) HideSettings() {
-	fmt.Println("[DeskNotify] 隐藏设置窗口")
+	logger.Infof("[DeskNotify] 隐藏设置窗口")
 }
 
 func (m *headlessManager) OpenHistory() {
 	if m.cfgMgr != nil {
 		url := fmt.Sprintf("http://localhost:%d/history", m.cfgMgr.Get().Port)
-		fmt.Printf("[DeskNotify] 请访问历史通知: %s\n", url)
+		logger.Infof("[DeskNotify] 请访问历史通知: %s", url)
 		openBrowser(url)
 	}
 }
 
 func (m *headlessManager) HideHistory() {
-	fmt.Println("[DeskNotify] 隐藏历史通知窗口")
+	logger.Infof("[DeskNotify] 隐藏历史通知窗口")
 }
 
 func (m *headlessManager) OpenArchiveDir() error {
@@ -94,8 +95,14 @@ func (m *headlessManager) OpenArchiveDir() error {
 		className = m.cfgMgr.Get().ClassName
 	}
 	docDir := config.GetDocumentsDir(className)
-	fmt.Printf("[DeskNotify] 打开通知存档目录: %s\n", docDir)
+	logger.Infof("[DeskNotify] 打开通知存档目录: %s", docDir)
 	return openDirectory(docDir)
+}
+
+func (m *headlessManager) OpenLogsDir() error {
+	logsDir := config.GetLogsDir()
+	logger.Infof("[DeskNotify] 打开日志目录: %s", logsDir)
+	return openDirectory(logsDir)
 }
 
 func (m *headlessManager) OpenFile(filePath string) error {

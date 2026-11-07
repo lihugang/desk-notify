@@ -4,10 +4,30 @@ export default {
     "./index.html",
     "./card.html",
     "./settings.html",
+    "./history.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: [
+          '"CMU Sans Serif"',
+          '"Noto Sans SC"',
+          '"Noto Sans"',
+          '"Noto Sans Serif"',
+          'system-ui',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          '"Segoe UI"',
+          'Roboto',
+          '"Helvetica Neue"',
+          '"PingFang SC"',
+          '"Hiragino Sans GB"',
+          '"Microsoft YaHei"',
+          '"WenQuanYi Micro Hei"',
+          'sans-serif',
+        ],
+      },
       colors: {
         primary: {
           50: '#eff6ff',

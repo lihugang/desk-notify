@@ -346,6 +346,57 @@ func TestOpenArchiveDirAPI(t *testing.T) {
 	}
 }
 
+func TestOpenLogsDirAPI(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "desk_notify_logs_api_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfgMgr, _ := config.NewManagerWithDir(tempDir)
+	store, _ := db.NewStore(tempDir)
+	defer store.Close()
+	fileStorage := storage.NewStorage(tempDir)
+	tun := tunnel.NewMockTunnel()
+	mockDesktop := &mockDesktopManager{}
+	srv := NewServer(cfgMgr, store, fileStorage, tun, mockDesktop, nil)
+
+	// 1. GET /api/config should return logsDir in config
+	reqConfig := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	reqConfig.RemoteAddr = "127.0.0.1:1234"
+	wConfig := httptest.NewRecorder()
+	srv.handleConfig(wConfig, reqConfig)
+
+	var configRes map[string]interface{}
+	if err := json.NewDecoder(wConfig.Result().Body).Decode(&configRes); err != nil {
+		t.Fatalf("failed to decode config response: %v", err)
+	}
+	cfgMap := configRes["config"].(map[string]interface{})
+	if logsDir, ok := cfgMap["logsDir"].(string); !ok || logsDir == "" {
+		t.Fatalf("expected non-empty logsDir in config, got %v", cfgMap["logsDir"])
+	}
+
+	// 2. POST /api/logs/open should succeed and return ok: true and logsDir
+	reqOpen := httptest.NewRequest(http.MethodPost, "/api/logs/open", nil)
+	reqOpen.RemoteAddr = "127.0.0.1:1234"
+	wOpen := httptest.NewRecorder()
+	srv.handleOpenLogsDir(wOpen, reqOpen)
+
+	if wOpen.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from handleOpenLogsDir, got %d", wOpen.Result().StatusCode)
+	}
+	var openRes map[string]interface{}
+	if err := json.NewDecoder(wOpen.Result().Body).Decode(&openRes); err != nil {
+		t.Fatalf("failed to decode open response: %v", err)
+	}
+	if ok, _ := openRes["ok"].(bool); !ok {
+		t.Fatalf("expected ok: true in open response, got %v", openRes)
+	}
+	if logsDir, ok := openRes["logsDir"].(string); !ok || logsDir == "" {
+		t.Fatalf("expected non-empty logsDir in open response, got %v", openRes["logsDir"])
+	}
+}
+
 func TestSettingsHideAndLockAdmin(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "desk_notify_lock_test_*")
 	if err != nil {

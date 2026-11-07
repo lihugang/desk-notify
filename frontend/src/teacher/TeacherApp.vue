@@ -305,7 +305,7 @@ const authError = ref('');
 const loggingIn = ref(false);
 
 const textContent = ref('');
-const isPinned = ref(true);
+const isPinned = ref(false);
 const duration = ref(0);
 const images = ref<UploadItem[]>([]);
 const attachments = ref<UploadItem[]>([]);
@@ -488,6 +488,7 @@ async function handleSubmit() {
       textContent.value = '';
       images.value = [];
       attachments.value = [];
+      isPinned.value = false;
       isPreview.value = false;
       historyListRef.value?.reload();
       alert('已成功投递到班级大屏！');

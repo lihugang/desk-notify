@@ -17,6 +17,7 @@ type Manager interface {
 	OpenHistory()
 	HideHistory()
 	OpenArchiveDir() error
+	OpenLogsDir() error
 	OpenFile(filePath string) error
 	RevealFile(filePath string) error
 	Quit()

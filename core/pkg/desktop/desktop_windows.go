@@ -14,6 +14,7 @@ import (
 
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
+	"github.com/lihugang/desk-notify/core/pkg/logger"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -186,22 +187,14 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 
 	menu.Add("打开通知存档目录").OnClick(func(ctx *application.Context) {
 		if err := m.OpenArchiveDir(); err != nil {
-			fmt.Printf("[DeskNotify] 打开通知存档目录失败: %v\n", err)
+			logger.Errorf("[DeskNotify] 打开通知存档目录失败: %v", err)
 		}
 	})
 
-	menu.Add("打开教师投递端 (网页)").OnClick(func(ctx *application.Context) {
-		port := cfg.Port
-		if m.cfgMgr != nil {
-			port = m.cfgMgr.Get().Port
+	menu.Add("打开运行日志目录").OnClick(func(ctx *application.Context) {
+		if err := m.OpenLogsDir(); err != nil {
+			logger.Errorf("[DeskNotify] 打开运行日志目录失败: %v", err)
 		}
-		_ = m.app.Browser.OpenURL(fmt.Sprintf("http://localhost:%d/", port))
-	})
-
-	menu.AddSeparator()
-
-	menu.Add("退出 DeskNotify").OnClick(func(ctx *application.Context) {
-		m.Quit()
 	})
 
 	tray.SetMenu(menu)
@@ -410,6 +403,11 @@ func (m *windowsManager) OpenArchiveDir() error {
 	}
 	docDir := config.GetDocumentsDir(className)
 	return openDirectory(docDir)
+}
+
+func (m *windowsManager) OpenLogsDir() error {
+	logsDir := config.GetLogsDir()
+	return openDirectory(logsDir)
 }
 
 func (m *windowsManager) OpenFile(filePath string) error {

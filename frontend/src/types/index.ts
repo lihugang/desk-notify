@@ -37,6 +37,7 @@ export interface AppConfig {
   autoStart: boolean;
   firstRunDone?: boolean;
   documentsDir?: string;
+  logsDir?: string;
   frp: {
     enabled: boolean;
     serverAddr: string;

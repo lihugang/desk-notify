@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/lihugang/desk-notify/core/pkg/desktop"
@@ -154,5 +156,110 @@ func TestLatestNotifyEndpoint(t *testing.T) {
 	srv.handleWindowStopFlash(recFlash, reqFlash)
 	if recFlash.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK for stop-flash, got %d", recFlash.Code)
+	}
+}
+
+func TestBroadcastNotificationWithRecentList(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "desk_notify_broadcast_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfgMgr, err := config.NewManagerWithDir(tempDir)
+	if err != nil {
+		t.Fatalf("failed to init config manager: %v", err)
+	}
+	store, err := db.NewStore(tempDir)
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer store.Close()
+
+	fileStorage := storage.NewStorage(tempDir)
+	tun := tunnel.NewMockTunnel()
+	desk := desktop.NewManager()
+	srv := NewServer(cfgMgr, store, fileStorage, tun, desk, nil)
+
+	// Save an earlier notification (15 mins ago)
+	earlierN := &db.Notification{
+		ID:        "earlier_msg_1",
+		Content:   "15分钟前的通知",
+		Pinned:    false,
+		Duration:  0,
+		Sender:    "127.0.0.1",
+		CreatedAt: time.Now().Add(-15 * time.Minute),
+	}
+	if err := store.SaveNotification(earlierN, nil); err != nil {
+		t.Fatalf("failed to save earlier notification: %v", err)
+	}
+
+	// Also an expired notification (95 mins ago)
+	expiredN := &db.Notification{
+		ID:        "expired_msg",
+		Content:   "95分钟前的过期通知",
+		Pinned:    false,
+		Duration:  0,
+		Sender:    "127.0.0.1",
+		CreatedAt: time.Now().Add(-95 * time.Minute),
+	}
+	_ = store.SaveNotification(expiredN, nil)
+
+	// Start test HTTP server with WebSocket handler
+	ts := httptest.NewServer(http.HandlerFunc(srv.handleWS))
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
+	wsClient, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial websocket: %v", err)
+	}
+	defer wsClient.Close()
+
+	// Wait briefly for server to register the client
+	time.Sleep(50 * time.Millisecond)
+
+	// Now broadcast a brand new notification
+	newN := &db.Notification{
+		ID:        "new_broadcast_msg",
+		Content:   "刚刚发送的最新通知",
+		Pinned:    true,
+		Duration:  10,
+		Sender:    "127.0.0.1",
+		CreatedAt: time.Now(),
+	}
+	if err := store.SaveNotification(newN, nil); err != nil {
+		t.Fatalf("failed to save new notification: %v", err)
+	}
+
+	srv.broadcastNotification(newN)
+
+	// Read message from WebSocket client
+	_ = wsClient.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msgBytes, err := wsClient.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read from websocket: %v", err)
+	}
+
+	var payload struct {
+		ID            string             `json:"id"`
+		Content       string             `json:"content"`
+		Notifications []*db.Notification `json:"notifications"`
+	}
+	if err := json.Unmarshal(msgBytes, &payload); err != nil {
+		t.Fatalf("failed to parse websocket broadcast payload: %v", err)
+	}
+
+	if payload.ID != "new_broadcast_msg" {
+		t.Fatalf("expected payload.ID 'new_broadcast_msg', got %q", payload.ID)
+	}
+
+	// Should contain exactly 2 notifications within 90 minutes (new_broadcast_msg and earlier_msg_1)
+	if len(payload.Notifications) != 2 {
+		t.Fatalf("expected 2 notifications within 90 minutes in broadcast payload, got %d", len(payload.Notifications))
+	}
+
+	if payload.Notifications[0].ID != "new_broadcast_msg" || payload.Notifications[1].ID != "earlier_msg_1" {
+		t.Fatalf("unexpected order or content of notifications in broadcast: %+v", payload.Notifications)
 	}
 }

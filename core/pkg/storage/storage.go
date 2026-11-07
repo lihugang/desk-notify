@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lihugang/desk-notify/core/pkg/config"
+	"github.com/lihugang/desk-notify/core/pkg/logger"
 )
 
 type Storage struct {
@@ -54,7 +55,7 @@ func (s *Storage) SaveFile(notifyID, filename string, r io.Reader, className str
 	if err := os.Link(localPath, docPath); err != nil {
 		// Fallback to copy if hard link fails (e.g., cross-device boundary)
 		if cpErr := copyFile(localPath, docPath); cpErr != nil {
-			fmt.Printf("warning: failed to mirror file to documents: %v\n", cpErr)
+			logger.Warnf("[DeskNotify] 备份文件至文档目录失败: %v", cpErr)
 			docPath = localPath
 		}
 	}

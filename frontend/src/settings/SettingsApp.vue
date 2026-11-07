@@ -334,6 +334,46 @@
           </div>
         </div>
 
+        <!-- System Logs Directory Section -->
+        <div class="pt-3 border-t border-slate-100 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-xs font-semibold text-slate-700">运行日志目录</span>
+              <p class="text-[11px] text-slate-400 mt-0.5">系统按天自动记录运行、网络穿透与故障排查日志（位于 %APPDATA%/DeskNotify/logs）</p>
+            </div>
+          </div>
+
+          <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-2 flex-1 min-w-0">
+              <component :is="FileText" class="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span class="text-xs font-mono text-slate-600 truncate select-all" :title="config.logsDir">
+                {{ config.logsDir || '%APPDATA%\\DeskNotify\\logs' }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                @click="openLogsDir"
+                :disabled="openingLogsDir"
+                class="px-2.5 py-1.5 text-xs bg-white hover:bg-emerald-50 text-emerald-600 border border-slate-200 hover:border-emerald-300 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs cursor-pointer disabled:opacity-60"
+                title="在资源管理器中打开日志文件夹"
+              >
+                <FolderOpen class="w-3.5 h-3.5" />
+                <span>{{ openingLogsDir ? '正在呼出...' : '打开日志目录' }}</span>
+              </button>
+              <button
+                type="button"
+                @click="copyLogsDir"
+                class="px-2.5 py-1.5 text-xs bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                title="复制日志目录路径"
+              >
+                <Copy class="w-3.5 h-3.5" />
+                <span>复制路径</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div class="pt-3 flex justify-end">
           <button
             @click="saveBasicConfig"
@@ -573,7 +613,8 @@ import {
   EyeOff,
   Sparkles,
   Folder,
-  FolderOpen
+  FolderOpen,
+  FileText
 } from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import type { AppConfig } from '../types';
@@ -1059,6 +1100,37 @@ function copyArchiveDir() {
   const dir = config.value.documentsDir || `我的文档\\DeskNotify\\${config.value.className || '班级通知'}`;
   navigator.clipboard.writeText(dir).then(() => {
     alert(`通知存档目录路径已复制到剪贴板：\n${dir}`);
+  }).catch(() => {
+    alert(`请复制路径：${dir}`);
+  });
+}
+
+const openingLogsDir = ref(false);
+
+async function openLogsDir() {
+  openingLogsDir.value = true;
+  try {
+    const res = await fetch('/api/logs/open', { method: 'POST' });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(errText || `打开失败 (${res.status})`);
+    }
+    const data = await res.json().catch(() => ({}));
+    if (data.logsDir) {
+      config.value.logsDir = data.logsDir;
+    }
+    alert('已呼出系统资源管理器打开运行日志目录');
+  } catch (err: any) {
+    alert(`打开日志目录失败：${err.message || '系统错误'}`);
+  } finally {
+    openingLogsDir.value = false;
+  }
+}
+
+function copyLogsDir() {
+  const dir = config.value.logsDir || '%APPDATA%\\DeskNotify\\logs';
+  navigator.clipboard.writeText(dir).then(() => {
+    alert(`运行日志目录路径已复制到剪贴板：\n${dir}`);
   }).catch(() => {
     alert(`请复制路径：${dir}`);
   });

@@ -2,6 +2,10 @@ import { createApp } from 'vue';
 import TeacherApp from './teacher/TeacherApp.vue';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
+import { initPangu } from './utils/pangu';
+
+// Initialize Pangu (盘古之白) text auto-spacing
+initPangu();
 
 // Register PWA service worker with auto-update
 const updateSW = registerSW({

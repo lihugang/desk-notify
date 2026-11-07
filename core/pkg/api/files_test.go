@@ -35,6 +35,7 @@ func (m *mockDesktopManager) HideSettings()                    {}
 func (m *mockDesktopManager) OpenHistory()                     {}
 func (m *mockDesktopManager) HideHistory()                     {}
 func (m *mockDesktopManager) OpenArchiveDir() error            { return nil }
+func (m *mockDesktopManager) OpenLogsDir() error               { return nil }
 func (m *mockDesktopManager) OpenFile(filePath string) error {
 	m.openedFile = filePath
 	return nil

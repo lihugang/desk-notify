@@ -23,6 +23,7 @@ import (
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/lihugang/desk-notify/core/pkg/desktop"
+	"github.com/lihugang/desk-notify/core/pkg/logger"
 	"github.com/lihugang/desk-notify/core/pkg/storage"
 	"github.com/lihugang/desk-notify/core/pkg/tunnel"
 )
@@ -108,6 +109,8 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 	mux.HandleFunc("/api/window/history-show", s.handleHistoryShow)
 	mux.HandleFunc("/api/archive/open", s.handleOpenArchiveDir)
 	mux.HandleFunc("/api/open-archive-dir", s.handleOpenArchiveDir)
+	mux.HandleFunc("/api/logs/open", s.handleOpenLogsDir)
+	mux.HandleFunc("/api/open-logs-dir", s.handleOpenLogsDir)
 	mux.HandleFunc("/ws", s.handleWS)
 
 	// Root CA Certificate download endpoints
@@ -136,10 +139,30 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 		})
 	}
 
+	type statusRecorder struct {
+		http.ResponseWriter
+		status int
+	}
+
+	loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ws" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		mux.ServeHTTP(rec, r)
+		duration := time.Since(start)
+
+		if strings.HasPrefix(r.URL.Path, "/api/") || rec.status >= 400 {
+			logger.Infof("[HTTP] %s %s from %s -> %d (%v)", r.Method, r.URL.Path, r.RemoteAddr, rec.status, duration)
+		}
+	})
+
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: loggingHandler,
 	}
 
 	// 1. Initialize local TLS Server Certificate (signed by embedded DeskNotify Root CA)
@@ -150,16 +173,16 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 		httpsAddr := fmt.Sprintf("0.0.0.0:%d", httpsPort)
 		s.httpsServer = &http.Server{
 			Addr:    httpsAddr,
-			Handler: mux,
+			Handler: loggingHandler,
 		}
 		go func() {
-			fmt.Printf("[DeskNotify] HTTPS 服务已就绪: https://0.0.0.0:%d (CA 信任模式已启用)\n", httpsPort)
+			logger.Infof("[DeskNotify] HTTPS 服务已就绪: https://0.0.0.0:%d (CA 信任模式已启用)", httpsPort)
 			if err := s.httpsServer.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
-				fmt.Printf("[DeskNotify] HTTPS 服务异常: %v\n", err)
+				logger.Errorf("[DeskNotify] HTTPS 服务异常: %v", err)
 			}
 		}()
 	} else {
-		fmt.Printf("[DeskNotify] 警告: 初始化 TLS 证书失败: %v\n", err)
+		logger.Warnf("[DeskNotify] 警告: 初始化 TLS 证书失败: %v", err)
 	}
 
 	ln, err := net.Listen("tcp", addr)
@@ -170,7 +193,7 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 		close(ready)
 	}
 
-	fmt.Printf("[DeskNotify] HTTP Web server listening on %s\n", addr)
+	logger.Infof("[DeskNotify] HTTP Web server listening on %s", addr)
 	return s.httpServer.Serve(ln)
 }
 
@@ -239,6 +262,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"firstRunDone":      cfg.FirstRunDone,
 			"frp":               cfg.FRP,
 			"documentsDir":      config.GetDocumentsDir(cfg.ClassName),
+			"logsDir":           config.GetLogsDir(),
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -338,9 +362,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 		cfg.FirstRunDone = true
 		if err := s.cfgMgr.Save(cfg); err != nil {
+			logger.Errorf("[Config] 保存系统配置失败: %v", err)
 			http.Error(w, "Failed to save config", http.StatusInternalServerError)
 			return
 		}
+		logger.Infof("[Config] 系统配置已更新并保存 (班级: %s, 端口: %d, 来源: %s)", cfg.ClassName, cfg.Port, r.RemoteAddr)
 
 		// Hot reload tunnel / FRP whenever FRP config or security parameters are saved
 		if frpChanged || (isAdmin && (req.FRP != nil || req.LanAuthRequired != nil || newPasswordVal != "")) {
@@ -409,15 +435,19 @@ func (s *Server) handleAdminVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !valid {
+		logger.Warnf("[Auth] 管理员身份验证失败: 密码错误 (来源: %s)", r.RemoteAddr)
 		http.Error(w, "密码错误，请重新输入", http.StatusUnauthorized)
 		return
 	}
 
 	token, err := auth.GenerateAdminToken()
 	if err != nil {
+		logger.Errorf("[Auth] 生成管理员 Token 失败: %v", err)
 		http.Error(w, "Token generation error", http.StatusInternalServerError)
 		return
 	}
+
+	logger.Infof("[Auth] 管理员身份验证通过 (来源: %s)", r.RemoteAddr)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "dn_admin_token",
@@ -457,15 +487,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !valid {
+		logger.Warnf("[Auth] 教师端口令验证失败: 密码错误 (来源: %s)", r.RemoteAddr)
 		http.Error(w, "密码错误，请重新输入", http.StatusUnauthorized)
 		return
 	}
 
 	token, err := auth.GenerateToken(req.Password)
 	if err != nil {
+		logger.Errorf("[Auth] 生成教师端 Token 失败: %v", err)
 		http.Error(w, "Token error", http.StatusInternalServerError)
 		return
 	}
+
+	logger.Infof("[Auth] 教师端口令验证通过 (来源: %s)", r.RemoteAddr)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "dn_token",
@@ -633,6 +667,8 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	if s.desktop != nil {
 		s.desktop.Notify(n)
 	}
+
+	logger.Infof("[Notify] 成功推送新通知 (ID: %s, 置顶: %v, 附件数: %d, 来源: %s)", notifyID, pinned, len(attachments), r.RemoteAddr)
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": notifyID})
@@ -941,18 +977,24 @@ func (s *Server) processFileReveal(w http.ResponseWriter, r *http.Request, attID
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		logger.Warnf("[WS] 升级 WebSocket 失败 (%s): %v", r.RemoteAddr, err)
 		return
 	}
 
 	s.mu.Lock()
 	s.clients[conn] = true
+	clientCount := len(s.clients)
 	s.mu.Unlock()
+
+	logger.Infof("[WS] 客户端已连接 (%s, 当前在线客户端: %d)", r.RemoteAddr, clientCount)
 
 	defer func() {
 		s.mu.Lock()
 		delete(s.clients, conn)
+		remaining := len(s.clients)
 		s.mu.Unlock()
 		_ = conn.Close()
+		logger.Infof("[WS] 客户端已断开 (%s, 剩余在线客户端: %d)", r.RemoteAddr, remaining)
 	}()
 
 	// Keep alive read loop
@@ -969,15 +1011,25 @@ func (s *Server) broadcastNotification(n *db.Notification) {
 
 	cfg := s.cfgMgr.Get()
 
-	// Broadcast notification enriched with sound configuration
+	var recent []*db.Notification
+	if s.store != nil {
+		recent, _ = s.store.GetRecentWithinMinutes(90)
+	}
+	if len(recent) == 0 {
+		recent = []*db.Notification{n}
+	}
+
+	// Broadcast notification enriched with sound configuration and recent 90-min list
 	msg := struct {
 		*db.Notification
-		SoundEnabled bool   `json:"soundEnabled"`
-		SoundURL     string `json:"soundUrl"`
+		SoundEnabled  bool               `json:"soundEnabled"`
+		SoundURL      string             `json:"soundUrl"`
+		Notifications []*db.Notification `json:"notifications"`
 	}{
-		Notification: n,
-		SoundEnabled: cfg.SoundEnabled,
-		SoundURL:     fmt.Sprintf("/api/sound/current?t=%d", time.Now().UnixMilli()),
+		Notification:  n,
+		SoundEnabled:  cfg.SoundEnabled,
+		SoundURL:      fmt.Sprintf("/api/sound/current?t=%d", time.Now().UnixMilli()),
+		Notifications: recent,
 	}
 
 	data, err := json.Marshal(msg)
@@ -1191,7 +1243,7 @@ func (s *Server) handleOpenArchiveDir(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.desktop != nil {
 		if err := s.desktop.OpenArchiveDir(); err != nil {
-			fmt.Printf("[DeskNotify] 打开通知存档目录失败: %v\n", err)
+			logger.Errorf("[DeskNotify] 打开通知存档目录失败: %v", err)
 			http.Error(w, fmt.Sprintf("打开存档目录失败: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -1200,6 +1252,30 @@ func (s *Server) handleOpenArchiveDir(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":           true,
 		"documentsDir": config.GetDocumentsDir(cfg.ClassName),
+	})
+}
+
+func (s *Server) handleOpenLogsDir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg := s.cfgMgr.Get()
+	if !auth.CheckAuth(r, cfg) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if s.desktop != nil {
+		if err := s.desktop.OpenLogsDir(); err != nil {
+			logger.Errorf("[DeskNotify] 打开运行日志目录失败: %v", err)
+			http.Error(w, fmt.Sprintf("打开日志目录失败: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":      true,
+		"logsDir": config.GetLogsDir(),
 	})
 }
 

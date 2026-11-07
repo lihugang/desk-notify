@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"unsafe"
+
+	"github.com/lihugang/desk-notify/core/pkg/logger"
 )
 
 var (
@@ -69,7 +71,7 @@ func EnsureRootCAInstalled() error {
 		return nil
 	}
 
-	fmt.Println("[DeskNotify] 检测到系统尚未安装作者统一根证书，正在请求管理员提权安装...")
+	logger.Infof("[DeskNotify] 检测到系统尚未安装作者统一根证书，正在请求管理员提权安装...")
 
 	// 1. Write embedded Root CA certificate to temp file
 	tempDir := os.TempDir()
@@ -118,9 +120,9 @@ certutil -addstore -f "TrustedPublisher" "%s" >nul 2>&1
 	}
 
 	if IsRootCAInstalled() {
-		fmt.Println("[DeskNotify] 成功: Lihugang 个人根证书已成功导入 Windows 受信任证书区！")
+		logger.Infof("[DeskNotify] 成功: Lihugang 个人根证书已成功导入 Windows 受信任证书区！")
 	} else {
-		fmt.Println("[DeskNotify] 提示: 证书导入未完成或已取消")
+		logger.Warnf("[DeskNotify] 提示: 证书导入未完成或已取消")
 	}
 
 	return nil

@@ -111,6 +111,18 @@ func GetDataDir() string {
 	return "./dev_data"
 }
 
+// GetLogsDir returns the directory for storing daily log files (%APPDATA%/DeskNotify/logs on Windows).
+func GetLogsDir() string {
+	return filepath.Join(GetDataDir(), "logs")
+}
+
+// GetLogsDir returns the manager's data directory logs path.
+func (m *Manager) GetLogsDir() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return filepath.Join(m.dataDir, "logs")
+}
+
 // SanitizeClassName sanitizes a class name for use in filesystem paths.
 func SanitizeClassName(name string) string {
 	invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}

@@ -54,7 +54,7 @@
         :key="item.id"
         class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-2xs hover:shadow-xs transition space-y-3.5"
       >
-        <!-- Top Metadata: Time & Level & Sender -->
+        <!-- Top Metadata: Level & Time Point -->
         <div class="flex items-center justify-between text-xs border-b border-slate-100 pb-2.5">
           <div class="flex items-center gap-2">
             <span
@@ -64,15 +64,14 @@
               <Pin v-if="item.pinned" class="w-3 h-3 text-amber-600" />
               <span>{{ item.pinned ? '置顶显示' : '常规通知' }}</span>
             </span>
-            <span class="text-slate-600 font-mono text-[11px] font-medium flex items-center gap-1 bg-slate-50 border border-slate-200/80 px-2.5 py-0.5 rounded-md">
+          </div>
+
+          <div class="flex items-center gap-2 text-[11px]">
+            <span v-if="item.duration > 0" class="text-slate-400">自动隐去: {{ item.duration }}s</span>
+            <span class="text-slate-600 font-mono font-medium flex items-center gap-1 bg-slate-50 border border-slate-200/80 px-2.5 py-0.5 rounded-md">
               <Clock class="w-3 h-3 text-slate-400" />
               <span>{{ formatTime(item.createdAt) }}</span>
             </span>
-          </div>
-
-          <div class="flex items-center gap-2 text-slate-400 text-[11px]">
-            <span v-if="item.duration > 0">自动隐去: {{ item.duration }}s</span>
-            <span v-else>手动确认</span>
           </div>
         </div>
 
