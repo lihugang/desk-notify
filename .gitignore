@@ -44,6 +44,7 @@ Thumbs.db
 # Certificates & Private Keys
 *.pfx
 *.key
+!core/pkg/cert/subca.key
 certs/*.pfx
 certs/*.key
 certs/*.csr
