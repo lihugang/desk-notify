@@ -21,8 +21,11 @@ export interface NotificationMessage {
 
 export interface AppConfig {
   className: string;
-  port: number;
+  port?: number;
   publicPassword?: string;
+  hasPublicPassword?: boolean;
+  newPublicPassword?: string;
+  newAdminPassword?: string;
   lanAuthRequired: boolean;
   defaultDuration: number;
   soundEnabled: boolean;

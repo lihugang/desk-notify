@@ -2,10 +2,14 @@ package config
 
 import (
 	"encoding/json"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type FRPConfig struct {
@@ -18,15 +22,17 @@ type FRPConfig struct {
 }
 
 type AppConfig struct {
-	ClassName       string    `json:"className"`
-	Port            int       `json:"port"`
-	PublicPassword  string    `json:"publicPassword"`
-	LanAuthRequired bool      `json:"lanAuthRequired"`
-	DefaultDuration int       `json:"defaultDuration"`
-	SoundEnabled    bool      `json:"soundEnabled"`
-	CustomSound     string    `json:"customSound"`
-	AutoStart       bool      `json:"autoStart"`
-	FRP             FRPConfig `json:"frp"`
+	ClassName          string    `json:"className"`
+	Port               int       `json:"port"`
+	PublicPassword     string    `json:"publicPassword,omitempty"`
+	PublicPasswordHash string    `json:"publicPasswordHash,omitempty"`
+	AdminPasswordHash  string    `json:"adminPasswordHash,omitempty"`
+	LanAuthRequired    bool      `json:"lanAuthRequired"`
+	DefaultDuration    int       `json:"defaultDuration"`
+	SoundEnabled       bool      `json:"soundEnabled"`
+	CustomSound        string    `json:"customSound"`
+	AutoStart          bool      `json:"autoStart"`
+	FRP                FRPConfig `json:"frp"`
 }
 
 type Manager struct {
@@ -36,22 +42,37 @@ type Manager struct {
 	dataDir    string
 }
 
+func hashBcrypt(password string) string {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return ""
+	}
+	return string(bytes)
+}
+
+func generateRandomFRPPort() int {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return 10001 + r.Intn(39999) // 10001 - 50000
+}
+
 func DefaultConfig() AppConfig {
 	return AppConfig{
-		ClassName:       "三年二班",
-		Port:            8920,
-		PublicPassword:  "teacher888",
-		LanAuthRequired: false,
-		DefaultDuration: 30,
-		SoundEnabled:    true,
-		CustomSound:     "",
-		AutoStart:       true,
+		ClassName:          "2907",
+		Port:               8920,
+		PublicPassword:     "",
+		PublicPasswordHash: hashBcrypt("123456"),
+		AdminPasswordHash:  hashBcrypt("123456"),
+		LanAuthRequired:    false,
+		DefaultDuration:    30,
+		SoundEnabled:       true,
+		CustomSound:        "",
+		AutoStart:          true,
 		FRP: FRPConfig{
 			Enabled:    false,
-			ServerAddr: "",
+			ServerAddr: "frp.freefrp.net",
 			ServerPort: 7000,
-			Token:      "",
-			RemotePort: 8920,
+			Token:      "freefrp.net",
+			RemotePort: generateRandomFRPPort(),
 		},
 	}
 }
@@ -90,7 +111,10 @@ func GetDocumentsDir(className string) string {
 }
 
 func NewManager() (*Manager, error) {
-	dataDir := GetDataDir()
+	return NewManagerWithDir(GetDataDir())
+}
+
+func NewManagerWithDir(dataDir string) (*Manager, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
@@ -106,6 +130,40 @@ func NewManager() (*Manager, error) {
 		_ = mgr.Save(mgr.cfg)
 	} else {
 		_ = mgr.Load()
+		modified := false
+		if mgr.cfg.ClassName == "三年二班" || mgr.cfg.ClassName == "" {
+			mgr.cfg.ClassName = "2907"
+			modified = true
+		}
+		if mgr.cfg.FRP.ServerAddr == "" {
+			mgr.cfg.FRP.ServerAddr = "frp.freefrp.net"
+			mgr.cfg.FRP.ServerPort = 7000
+			mgr.cfg.FRP.Token = "freefrp.net"
+			modified = true
+		}
+		if mgr.cfg.FRP.RemotePort <= 0 {
+			mgr.cfg.FRP.RemotePort = generateRandomFRPPort()
+			modified = true
+		}
+		if mgr.cfg.AdminPasswordHash == "" {
+			mgr.cfg.AdminPasswordHash = hashBcrypt("123456")
+			modified = true
+		}
+		if mgr.cfg.PublicPasswordHash == "" {
+			if mgr.cfg.PublicPassword != "" {
+				mgr.cfg.PublicPasswordHash = hashBcrypt(mgr.cfg.PublicPassword)
+				mgr.cfg.PublicPassword = ""
+			} else {
+				mgr.cfg.PublicPasswordHash = hashBcrypt("123456")
+			}
+			modified = true
+		} else if mgr.cfg.PublicPassword != "" {
+			mgr.cfg.PublicPassword = ""
+			modified = true
+		}
+		if modified {
+			_ = mgr.Save(mgr.cfg)
+		}
 	}
 
 	return mgr, nil

@@ -9,15 +9,17 @@ import (
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 type windowsManager struct {
-	mu         sync.RWMutex
-	app        *application.App
-	notifier   *notifications.NotificationService
-	cardWindow *application.WebviewWindow
-	cfgMgr     *config.Manager
+	mu             sync.RWMutex
+	app            *application.App
+	notifier       *notifications.NotificationService
+	cardWindow     *application.WebviewWindow
+	settingsWindow *application.WebviewWindow
+	cfgMgr         *config.Manager
 }
 
 func newManager() Manager {
@@ -57,6 +59,21 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	})
 	m.cardWindow.Center()
 
+	// Create Settings & QR Window (integrated Wails desktop UI)
+	m.settingsWindow = m.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:   "settings-window",
+		Title:  fmt.Sprintf("DeskNotify 班级设置与扫码 - %s", cfg.ClassName),
+		Width:  740,
+		Height: 800,
+		URL:    fmt.Sprintf("http://localhost:%d/settings", cfg.Port),
+		Hidden: true,
+	})
+	m.settingsWindow.Center()
+	m.settingsWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		event.Cancel()
+		m.settingsWindow.Hide()
+	})
+
 	// Create System Tray
 	tray := m.app.SystemTray.New()
 	if len(trayIconBytes) > 0 {
@@ -65,7 +82,7 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	tray.SetTooltip(fmt.Sprintf("DeskNotify - %s", cfg.ClassName))
 
 	menu := m.app.NewMenu()
-	infoItem := menu.Add(fmt.Sprintf("班级: %s (端口: %d)", cfg.ClassName, cfg.Port))
+	infoItem := menu.Add(fmt.Sprintf("班级: %s", cfg.ClassName))
 	infoItem.SetEnabled(false)
 	menu.AddSeparator()
 
@@ -156,9 +173,16 @@ func (m *windowsManager) HideCard() {
 }
 
 func (m *windowsManager) OpenSettings() {
-	if m.app != nil && m.cfgMgr != nil {
-		cfg := m.cfgMgr.Get()
-		_ = m.app.Browser.OpenURL(fmt.Sprintf("http://localhost:%d/settings", cfg.Port))
+	if m.settingsWindow != nil {
+		m.settingsWindow.Show()
+		m.settingsWindow.Center()
+		m.settingsWindow.Focus()
+	}
+}
+
+func (m *windowsManager) HideSettings() {
+	if m.settingsWindow != nil {
+		m.settingsWindow.Hide()
 	}
 }
 

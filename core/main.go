@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/lihugang/desk-notify/core/pkg/api"
+	"github.com/lihugang/desk-notify/core/pkg/cert"
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/lihugang/desk-notify/core/pkg/desktop"
@@ -17,6 +18,11 @@ func main() {
 	fmt.Println("==================================================")
 	fmt.Println("       DeskNotify 班级桌面通知投递系统            ")
 	fmt.Println("==================================================")
+
+	// 0. Ensure Lihugang Root CA is installed (auto-elevates via UAC on Windows first run)
+	if err := cert.EnsureRootCAInstalled(); err != nil {
+		fmt.Printf("[DeskNotify] 根证书自动安装未完成: %v\n", err)
+	}
 
 	// 1. Initialize Configuration
 	cfgMgr, err := config.NewManager()

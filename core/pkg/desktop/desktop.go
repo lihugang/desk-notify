@@ -11,6 +11,7 @@ type Manager interface {
 	ShowCard()
 	HideCard()
 	OpenSettings()
+	HideSettings()
 	Quit()
 }
 

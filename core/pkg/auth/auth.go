@@ -8,11 +8,13 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lihugang/desk-notify/core/pkg/config"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
 	privateIPBlocks []*net.IPNet
 	jwtSecretKey    = []byte("desk-notify-default-jwt-secret-key-32")
+	adminSecretKey  = []byte("desk-notify-admin-auth-secret-key-32")
 )
 
 func init() {
@@ -70,6 +72,21 @@ func IsPublicRequest(r *http.Request) bool {
 	return false
 }
 
+// HashPassword hashes a plain-text password using bcrypt with default salt cost.
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+// CheckPassword compares a bcrypt-hashed password with its possible plaintext equivalent.
+func CheckPassword(hashedPassword, password string) bool {
+	if hashedPassword == "" {
+		return false
+	}
+	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	return err == nil
+}
+
 func GenerateToken(password string) (string, error) {
 	claims := jwt.MapClaims{
 		"authorized": true,
@@ -95,6 +112,59 @@ func ValidateToken(tokenStr string) bool {
 	return true
 }
 
+func GenerateAdminToken() (string, error) {
+	claims := jwt.MapClaims{
+		"admin": true,
+		"exp":   time.Now().Add(24 * time.Hour).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(adminSecretKey)
+}
+
+func ValidateAdminToken(tokenStr string) bool {
+	if tokenStr == "" {
+		return false
+	}
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return adminSecretKey, nil
+	})
+	if err != nil || !token.Valid {
+		return false
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return false
+	}
+	isAdmin, ok := claims["admin"].(bool)
+	return ok && isAdmin
+}
+
+func CheckAdminAuth(r *http.Request) bool {
+	cookie, err := r.Cookie("dn_admin_token")
+	if err == nil && ValidateAdminToken(cookie.Value) {
+		return true
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if ValidateAdminToken(token) {
+			return true
+		}
+	}
+
+	if headerToken := r.Header.Get("X-Admin-Token"); headerToken != "" {
+		if ValidateAdminToken(headerToken) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func CheckAuth(r *http.Request, cfg config.AppConfig) bool {
 	isPublic := IsPublicRequest(r)
 
@@ -104,7 +174,7 @@ func CheckAuth(r *http.Request, cfg config.AppConfig) bool {
 	}
 
 	// If public, check if password is not set
-	if cfg.PublicPassword == "" {
+	if cfg.PublicPasswordHash == "" && cfg.PublicPassword == "" {
 		return true
 	}
 

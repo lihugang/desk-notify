@@ -82,8 +82,8 @@ jobs:
       - name: Package Release Assets
         shell: pwsh
         run: |
-          Copy-Item certs/DeskNotify-CA.cer build/
-          Copy-Item certs/install_ca.cmd "build/一键安装根证书(右键管理员运行).cmd"
+          Copy-Item certs/Lihugang-CA.cer build/
+          Copy-Item certs/install_ca.cmd "build/一键安装作者根证书(右键管理员运行).cmd"
           Compress-Archive -Path build/* -DestinationPath build/DeskNotify-Windows-x64.zip -Force
 
       - name: Create GitHub Release & Upload Asset
@@ -93,8 +93,8 @@ jobs:
           files: |
             build/DeskNotify.exe
             build/DeskNotify-Windows-x64.zip
-            build/DeskNotify-CA.cer
-            build/一键安装根证书(右键管理员运行).cmd
+            build/Lihugang-CA.cer
+            build/一键安装作者根证书(右键管理员运行).cmd
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false

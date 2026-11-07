@@ -26,26 +26,56 @@ func TestEnsureServerCertificate(t *testing.T) {
 		t.Errorf("keyPath does not exist: %v", err)
 	}
 
-	// Read and verify certificate
+	// Read and verify certificate chain
 	data, err := os.ReadFile(certPath)
 	if err != nil {
 		t.Fatalf("failed to read cert file: %v", err)
 	}
 
-	block, _ := pem.Decode(data)
+	// 1. Decode Leaf Cert
+	block, rest := pem.Decode(data)
 	if block == nil {
-		t.Fatalf("no PEM data found in cert file")
+		t.Fatalf("no leaf PEM data found in cert file")
 	}
-
-	serverCert, err := x509.ParseCertificate(block.Bytes)
+	leafCert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		t.Fatalf("failed to parse server cert: %v", err)
+		t.Fatalf("failed to parse leaf server cert: %v", err)
 	}
 
-	if serverCert.Subject.CommonName != "传纸条 Web Server (DeskNotify)" {
-		t.Errorf("unexpected CommonName: %v", serverCert.Subject.CommonName)
+	// 2. Decode Intermediate Sub CA Cert
+	subBlock, _ := pem.Decode(rest)
+	if subBlock == nil {
+		t.Fatalf("no intermediate PEM data found in cert file")
+	}
+	subCert, err := x509.ParseCertificate(subBlock.Bytes)
+	if err != nil {
+		t.Fatalf("failed to parse intermediate cert: %v", err)
 	}
 
-	t.Logf("Server certificate successfully generated! CN: %s, IPs: %v, DNS: %v",
-		serverCert.Subject.CommonName, serverCert.IPAddresses, serverCert.DNSNames)
+	// 3. Parse Root CA
+	rootBlock, _ := pem.Decode(rootCACertPEM)
+	rootCert, err := x509.ParseCertificate(rootBlock.Bytes)
+	if err != nil {
+		t.Fatalf("failed to parse root CA cert: %v", err)
+	}
+
+	roots := x509.NewCertPool()
+	roots.AddCert(rootCert)
+
+	intermediates := x509.NewCertPool()
+	intermediates.AddCert(subCert)
+
+	opts := x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		DNSName:       "localhost",
+	}
+
+	chains, err := leafCert.Verify(opts)
+	if err != nil {
+		t.Fatalf("chain verification failed against Lihugang Root CA: %v", err)
+	}
+
+	t.Logf("Server certificate successfully verified against Lihugang Root CA via Sub CA! Chains: %d, IPs: %v",
+		len(chains), leafCert.IPAddresses)
 }

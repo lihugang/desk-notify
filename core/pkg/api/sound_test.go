@@ -35,7 +35,7 @@ func setupTestServer(t *testing.T) (*Server, string) {
 		},
 	}
 
-	cfgMgr, err := config.NewManager()
+	cfgMgr, err := config.NewManagerWithDir(tempDir)
 	if err != nil {
 		t.Fatalf("failed to init config manager: %v", err)
 	}
@@ -43,6 +43,7 @@ func setupTestServer(t *testing.T) (*Server, string) {
 	// Override data dir for testing
 	cfg := cfgMgr.Get()
 	cfg.PublicPassword = ""
+	cfg.PublicPasswordHash = ""
 	cfg.LanAuthRequired = false
 	cfg.SoundEnabled = true
 	cfg.CustomSound = ""
@@ -143,6 +144,7 @@ func TestUploadCustomSound(t *testing.T) {
 	_ = writer.Close()
 
 	uploadReq := httptest.NewRequest(http.MethodPost, "/api/sound/upload", bodyBuf)
+	uploadReq.RemoteAddr = "127.0.0.1:12345"
 	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
 	w := httptest.NewRecorder()
 

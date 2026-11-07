@@ -142,7 +142,7 @@ func (s *Store) GetRecent(limit int) ([]*Notification, error) {
 	}
 	defer rows.Close()
 
-	var list []*Notification
+	list := make([]*Notification, 0)
 	for rows.Next() {
 		var n Notification
 		if err := rows.Scan(&n.ID, &n.Content, &n.Level, &n.Duration, &n.Sender, &n.CreatedAt); err != nil {
@@ -169,8 +169,9 @@ func (s *Store) GetRecent(limit int) ([]*Notification, error) {
 				a.URL = fmt.Sprintf("/api/files/%s", a.ID)
 				if a.IsImage {
 					n.Images = append(n.Images, a.URL)
+				} else {
+					n.Attachments = append(n.Attachments, &a)
 				}
-				n.Attachments = append(n.Attachments, &a)
 			}
 		}
 		attRows.Close()

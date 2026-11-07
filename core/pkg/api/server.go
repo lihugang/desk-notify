@@ -81,6 +81,7 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/api/config/verify-admin", s.handleAdminVerify)
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/notify", s.handleNotify)
 	mux.HandleFunc("/api/history", s.handleHistory)
@@ -90,14 +91,17 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/sound/upload", s.handleSoundUpload)
 	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
+	mux.HandleFunc("/api/window/settings-hide", s.handleSettingsHide)
+	mux.HandleFunc("/api/window/settings-show", s.handleSettingsShow)
 	mux.HandleFunc("/ws", s.handleWS)
 
 	// Root CA Certificate download endpoints
 	handleCACert := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-		w.Header().Set("Content-Disposition", `attachment; filename="DeskNotify-CA.cer"`)
+		w.Header().Set("Content-Disposition", `attachment; filename="Lihugang-CA.cer"`)
 		_, _ = w.Write(cert.GetRootCACertDER())
 	}
+	mux.HandleFunc("/Lihugang-CA.cer", handleCACert)
 	mux.HandleFunc("/DeskNotify-CA.cer", handleCACert)
 	mux.HandleFunc("/api/cert/ca.cer", handleCACert)
 
@@ -163,14 +167,20 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ips := getLocalIPs()
+	ips := FilterLanIPs(getLocalIPs())
+	frpUrl := s.tunnel.PublicURL()
+	if frpUrl == "" && cfg.FRP.Enabled && cfg.FRP.ServerAddr != "" && cfg.FRP.RemotePort > 0 {
+		frpUrl = fmt.Sprintf("http://%s:%d", cfg.FRP.ServerAddr, cfg.FRP.RemotePort)
+	}
+
 	resp := map[string]interface{}{
 		"className":    cfg.ClassName,
 		"lanIPs":       ips,
 		"port":         cfg.Port,
 		"httpsPort":    cfg.Port + 1,
 		"frpStatus":    s.tunnel.Status(),
-		"frpPublicUrl": s.tunnel.PublicURL(),
+		"frpPublicUrl": frpUrl,
+		"frpEnabled":   cfg.FRP.Enabled,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -185,43 +195,179 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
+		lanIPs := FilterLanIPs(getLocalIPs())
+		frpUrl := s.tunnel.PublicURL()
+		if frpUrl == "" && cfg.FRP.Enabled && cfg.FRP.ServerAddr != "" && cfg.FRP.RemotePort > 0 {
+			frpUrl = fmt.Sprintf("http://%s:%d", cfg.FRP.ServerAddr, cfg.FRP.RemotePort)
+		}
+
+		safeConfig := map[string]interface{}{
+			"className":         cfg.ClassName,
+			"port":              cfg.Port,
+			"hasPublicPassword": cfg.PublicPasswordHash != "" || cfg.PublicPassword != "",
+			"lanAuthRequired":   cfg.LanAuthRequired,
+			"defaultDuration":   cfg.DefaultDuration,
+			"soundEnabled":      cfg.SoundEnabled,
+			"customSound":       cfg.CustomSound,
+			"autoStart":         cfg.AutoStart,
+			"frp":               cfg.FRP,
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"config":       cfg,
-			"lanIPs":       getLocalIPs(),
-			"frpPublicUrl": s.tunnel.PublicURL(),
+			"config":       safeConfig,
+			"lanIPs":       lanIPs,
+			"frpPublicUrl": frpUrl,
+			"frpEnabled":   cfg.FRP.Enabled,
 		})
 		return
 	}
 
 	if r.Method == http.MethodPost {
-		var newCfg config.AppConfig
-		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+		var req struct {
+			ClassName         *string           `json:"className"`
+			DefaultDuration   *int              `json:"defaultDuration"`
+			SoundEnabled      *bool             `json:"soundEnabled"`
+			CustomSound       *string           `json:"customSound"`
+			AutoStart         *bool             `json:"autoStart"`
+			NewPublicPassword *string           `json:"newPublicPassword"`
+			NewAdminPassword  *string           `json:"newAdminPassword"`
+			FRP               *config.FRPConfig `json:"frp"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Bad request", http.StatusBadRequest)
 			return
 		}
 
-		if err := s.cfgMgr.Save(newCfg); err != nil {
+		isAdmin := auth.CheckAdminAuth(r)
+
+		// Level 1: Basic Parameters
+		if req.ClassName != nil {
+			cfg.ClassName = *req.ClassName
+		}
+		if req.DefaultDuration != nil {
+			cfg.DefaultDuration = *req.DefaultDuration
+		}
+		if req.SoundEnabled != nil {
+			cfg.SoundEnabled = *req.SoundEnabled
+		}
+		if req.CustomSound != nil {
+			cfg.CustomSound = *req.CustomSound
+		}
+		if req.AutoStart != nil {
+			cfg.AutoStart = *req.AutoStart
+		}
+
+		// Level 2: Advanced & FRP Parameters (Requires admin authentication)
+		frpChanged := false
+		if (req.NewPublicPassword != nil && *req.NewPublicPassword != "") ||
+			(req.NewAdminPassword != nil && *req.NewAdminPassword != "") ||
+			req.FRP != nil {
+			if !isAdmin {
+				http.Error(w, "修改公网投递口令或暴露服务到公网设置需要管理员密码", http.StatusForbidden)
+				return
+			}
+
+			if req.NewPublicPassword != nil && *req.NewPublicPassword != "" {
+				hash, err := auth.HashPassword(*req.NewPublicPassword)
+				if err == nil {
+					cfg.PublicPasswordHash = hash
+					cfg.PublicPassword = ""
+				}
+			}
+
+			if req.NewAdminPassword != nil && *req.NewAdminPassword != "" {
+				hash, err := auth.HashPassword(*req.NewAdminPassword)
+				if err == nil {
+					cfg.AdminPasswordHash = hash
+				}
+			}
+
+			if req.FRP != nil {
+				if req.FRP.RemotePort <= 0 {
+					req.FRP.RemotePort = cfg.FRP.RemotePort
+				}
+				if req.FRP.ServerAddr == "" {
+					req.FRP.ServerAddr = "frp.freefrp.net"
+				}
+				if req.FRP.ServerPort <= 0 {
+					req.FRP.ServerPort = 7000
+				}
+				if req.FRP.Token == "" {
+					req.FRP.Token = "freefrp.net"
+				}
+				cfg.FRP = *req.FRP
+				frpChanged = true
+			}
+		}
+
+		if err := s.cfgMgr.Save(cfg); err != nil {
 			http.Error(w, "Failed to save config", http.StatusInternalServerError)
 			return
 		}
 
-		// Reload tunnel
-		_ = s.tunnel.Stop()
-		_ = s.tunnel.Start(tunnel.Config{
-			Enabled:    newCfg.FRP.Enabled,
-			ServerAddr: newCfg.FRP.ServerAddr,
-			ServerPort: newCfg.FRP.ServerPort,
-			Token:      newCfg.FRP.Token,
-			RemotePort: newCfg.FRP.RemotePort,
-			LocalPort:  newCfg.Port,
-		})
+		if frpChanged {
+			_ = s.tunnel.Stop()
+			_ = s.tunnel.Start(tunnel.Config{
+				Enabled:    cfg.FRP.Enabled,
+				ServerAddr: cfg.FRP.ServerAddr,
+				ServerPort: cfg.FRP.ServerPort,
+				Token:      cfg.FRP.Token,
+				RemotePort: cfg.FRP.RemotePort,
+				LocalPort:  cfg.Port,
+			})
+		}
 
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) handleAdminVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+
+	cfg := s.cfgMgr.Get()
+	valid := false
+	if cfg.AdminPasswordHash != "" {
+		valid = auth.CheckPassword(cfg.AdminPasswordHash, req.Password)
+	} else {
+		valid = req.Password == "123456"
+	}
+
+	if !valid {
+		http.Error(w, "管理密码错误，请重新输入", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := auth.GenerateAdminToken()
+	if err != nil {
+		http.Error(w, "Token generation error", http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "dn_admin_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   24 * 3600,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "adminToken": token})
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +385,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := s.cfgMgr.Get()
-	if cfg.PublicPassword != "" && req.Password != cfg.PublicPassword {
+	valid := false
+	if cfg.PublicPasswordHash != "" {
+		valid = auth.CheckPassword(cfg.PublicPasswordHash, req.Password)
+	} else if cfg.PublicPassword != "" {
+		valid = req.Password == cfg.PublicPassword
+	} else {
+		valid = true
+	}
+
+	if !valid {
 		http.Error(w, "Invalid password", http.StatusUnauthorized)
 		return
 	}
@@ -367,8 +522,9 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	for _, a := range attachments {
 		if a.IsImage {
 			n.Images = append(n.Images, a.URL)
+		} else {
+			n.Attachments = append(n.Attachments, a)
 		}
-		n.Attachments = append(n.Attachments, a)
 	}
 	s.broadcastNotification(n)
 
@@ -406,6 +562,9 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to fetch history", http.StatusInternalServerError)
 		return
+	}
+	if list == nil {
+		list = make([]*db.Notification, 0)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -630,6 +789,20 @@ func (s *Server) handleSoundUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleSettingsHide(w http.ResponseWriter, r *http.Request) {
+	if s.desktop != nil {
+		s.desktop.HideSettings()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleSettingsShow(w http.ResponseWriter, r *http.Request) {
+	if s.desktop != nil {
+		s.desktop.OpenSettings()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func getLocalIPs() []string {
 	var ips []string
 	addrs, err := net.InterfaceAddrs()
@@ -645,6 +818,22 @@ func getLocalIPs() []string {
 	}
 	if len(ips) == 0 {
 		return []string{"127.0.0.1"}
+	}
+	return ips
+}
+
+// FilterLanIPs filters LAN IP addresses according to requirements:
+// If there are any IP addresses starting with "192.", use and return only those starting with 192, and hide others.
+// If none start with "192.", display all of them.
+func FilterLanIPs(ips []string) []string {
+	var ips192 []string
+	for _, ip := range ips {
+		if strings.HasPrefix(ip, "192.") {
+			ips192 = append(ips192, ip)
+		}
+	}
+	if len(ips192) > 0 {
+		return ips192
 	}
 	return ips
 }

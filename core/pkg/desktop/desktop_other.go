@@ -50,6 +50,10 @@ func (m *headlessManager) OpenSettings() {
 	}
 }
 
+func (m *headlessManager) HideSettings() {
+	fmt.Println("[DeskNotify] 隐藏设置窗口")
+}
+
 func (m *headlessManager) Quit() {
 	select {
 	case m.sigChan <- syscall.SIGTERM:

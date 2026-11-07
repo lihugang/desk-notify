@@ -1,108 +1,164 @@
 <template>
-  <div class="min-h-screen bg-slate-50 text-slate-800 p-6">
-    <div class="max-w-xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-      <!-- Tabs -->
-      <div class="flex border-b border-slate-200 bg-slate-50/50">
+  <div class="min-h-screen bg-slate-100 text-slate-800 p-4 sm:p-6 flex flex-col justify-between">
+    <div class="max-w-2xl mx-auto w-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+      <!-- Top Window Title & Close Bar -->
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between select-none">
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full bg-blue-500"></div>
+          <span class="text-xs font-bold text-slate-700 tracking-wide">DeskNotify · 班级设置与扫码</span>
+          <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-semibold">
+            {{ config.className || '2907' }}
+          </span>
+        </div>
+        <button
+          @click="closeWindow"
+          class="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-200/80 rounded-lg transition flex items-center gap-1"
+          title="关闭本窗口"
+        >
+          <X class="w-3.5 h-3.5" />
+          <span>关闭窗口</span>
+        </button>
+      </div>
+
+      <!-- Main Navigation Tabs -->
+      <div class="flex border-b border-slate-200 bg-white">
         <button
           @click="activeTab = 'qrcode'"
-          :class="activeTab === 'qrcode' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-slate-500 hover:text-slate-700'"
-          class="flex-1 py-3 text-sm font-semibold text-center transition flex items-center justify-center gap-1.5"
+          :class="activeTab === 'qrcode' ? 'border-b-2 border-blue-600 text-blue-600 font-bold bg-blue-50/40' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'"
+          class="flex-1 py-3 text-xs sm:text-sm font-semibold text-center transition flex items-center justify-center gap-1.5"
         >
           <QrCode class="w-4 h-4" />
           <span>扫码投递 (手机端)</span>
         </button>
+
         <button
-          @click="activeTab = 'config'"
-          :class="activeTab === 'config' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-slate-500 hover:text-slate-700'"
-          class="flex-1 py-3 text-sm font-semibold text-center transition flex items-center justify-center gap-1.5"
+          @click="activeTab = 'basic'"
+          :class="activeTab === 'basic' ? 'border-b-2 border-blue-600 text-blue-600 font-bold bg-blue-50/40' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'"
+          class="flex-1 py-3 text-xs sm:text-sm font-semibold text-center transition flex items-center justify-center gap-1.5"
         >
           <Settings class="w-4 h-4" />
-          <span>参数与穿透设置</span>
+          <span>基础设置</span>
+        </button>
+
+        <button
+          @click="activeTab = 'security'"
+          :class="activeTab === 'security' ? 'border-b-2 border-blue-600 text-blue-600 font-bold bg-blue-50/40' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'"
+          class="flex-1 py-3 text-xs sm:text-sm font-semibold text-center transition flex items-center justify-center gap-1.5"
+        >
+          <component :is="isUnlocked ? Unlock : Lock" class="w-4 h-4" :class="isUnlocked ? 'text-emerald-600' : 'text-slate-400'" />
+          <span>安全与公网</span>
+          <span v-if="!isUnlocked" class="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-500 rounded">需口令</span>
+          <span v-else class="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-700 rounded font-normal">已解锁</span>
         </button>
       </div>
 
-      <!-- Tab 1: QR Code & LAN Links -->
-      <div v-if="activeTab === 'qrcode'" class="p-6 text-center space-y-5">
-        <div>
-          <h2 class="text-base font-bold text-slate-900">{{ config.className || '三年二班' }} · 投递入口</h2>
-          <p class="text-xs text-slate-500 mt-0.5">请老师使用手机微信或浏览器扫描下方二维码</p>
+      <!-- Tab 1: QR Codes & Connection Addresses -->
+      <div v-if="activeTab === 'qrcode'" class="p-5 sm:p-6 space-y-5">
+        <div class="text-center">
+          <h2 class="text-base font-bold text-slate-900">{{ config.className || '2907' }} · 教师投递入口</h2>
+          <p class="text-xs text-slate-500 mt-1">老师使用手机微信或自带浏览器扫描下方对应地址的二维码，即可投递通知与课件</p>
         </div>
 
-        <div class="flex justify-center">
-          <div class="p-3 bg-white border-2 border-slate-100 rounded-2xl shadow-sm inline-block">
-            <canvas ref="qrCanvasRef" class="w-48 h-48 rounded-lg"></canvas>
-          </div>
-        </div>
-
-        <!-- Connection Addresses -->
-        <div class="space-y-2 text-left bg-slate-50 p-4 rounded-xl border border-slate-200">
-          <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">可选连接地址</p>
-          <div v-for="(ip, idx) in lanIPs" :key="'http-'+idx" class="flex items-center justify-between text-xs py-1">
-            <span class="text-slate-600 font-mono">http://{{ ip }}:{{ config.port }}</span>
-            <button @click="copyUrl(`http://${ip}:${config.port}`)" class="text-blue-600 hover:underline">复制链接</button>
-          </div>
-          <div v-for="(ip, idx) in lanIPs" :key="'https-'+idx" class="flex items-center justify-between text-xs py-1 border-t border-slate-200/50 pt-1">
-            <span class="text-indigo-600 font-mono flex items-center gap-1">
-              <span class="px-1 py-0.5 bg-indigo-50 text-[10px] rounded font-medium">HTTPS</span>
-              https://{{ ip }}:{{ (config.port || 8920) + 1 }}
-            </span>
-            <button @click="copyUrl(`https://${ip}:${(config.port || 8920) + 1}`)" class="text-indigo-600 hover:underline">复制</button>
-          </div>
-          <div v-if="frpPublicUrl" class="flex items-center justify-between text-xs py-1 border-t border-slate-200/60 pt-1.5">
-            <span class="text-emerald-600 font-medium font-mono truncate mr-2">公网: {{ frpPublicUrl }}</span>
-            <button @click="copyUrl(frpPublicUrl)" class="text-blue-600 hover:underline flex-shrink-0">复制链接</button>
+        <!-- Address Cards Grid -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">可选连接地址列表</span>
+            <span class="text-[11px] text-slate-400">点击二维码可放大全屏扫描</span>
           </div>
 
-          <!-- Root CA Certificate Info & Download -->
-          <div class="mt-3 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs">
-            <div class="text-[11px] text-slate-500">
-              <span>手机/电脑导入根证书，可消除警告并安装 PWA</span>
-            </div>
-            <a
-              href="/DeskNotify-CA.cer"
-              download="DeskNotify-CA.cer"
-              class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded text-slate-700 text-xs font-medium shadow-2xs transition inline-flex items-center gap-1"
+          <div
+            v-for="item in displayAddresses"
+            :key="item.id"
+            class="bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-xl p-3.5 transition flex flex-col sm:flex-row items-center gap-4 group"
+          >
+            <!-- Rendered QR Code for THIS address -->
+            <div
+              class="bg-white p-2 border border-slate-200 rounded-xl shadow-2xs flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-blue-400 transition"
+              @click="openZoom(item)"
+              title="点击放大二维码"
             >
-              <span>下载根证书 (.cer)</span>
-            </a>
+              <canvas :ref="(el) => setQrCanvas(item.url, el)" class="w-28 h-28 rounded-lg block"></canvas>
+            </div>
+
+            <!-- Address Info & Actions -->
+            <div class="flex-1 min-w-0 text-center sm:text-left space-y-1.5">
+              <div class="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+                <span class="text-xs font-bold text-slate-800">{{ item.type }}</span>
+                <span class="px-2 py-0.5 text-[10px] rounded-full font-semibold border" :class="item.badgeClass">
+                  {{ item.badge }}
+                </span>
+              </div>
+
+              <div class="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 font-mono text-xs text-slate-700 select-all break-all">
+                {{ item.url }}
+              </div>
+
+              <p class="text-[11px] text-slate-400 leading-normal">{{ item.desc }}</p>
+
+              <div class="pt-1 flex items-center justify-center sm:justify-start gap-2">
+                <button
+                  @click="copyUrl(item.url)"
+                  class="px-2.5 py-1 text-xs bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs"
+                >
+                  <Copy class="w-3 h-3" />
+                  <span>复制链接</span>
+                </button>
+                <button
+                  @click="openZoom(item)"
+                  class="px-2.5 py-1 text-xs bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-lg font-medium transition flex items-center gap-1 shadow-2xs"
+                >
+                  <QrCode class="w-3 h-3" />
+                  <span>放大二维码</span>
+                </button>
+              </div>
+            </div>
           </div>
+        </div>
+
+        <!-- Root CA Certificate Info & Download -->
+        <div class="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3.5 flex items-center justify-between text-xs">
+          <div class="space-y-0.5">
+            <p class="font-semibold text-indigo-900">安装 DeskNotify 根证书 (HTTPS)</p>
+            <p class="text-[11px] text-indigo-600/80">手机/电脑导入证书可消除浏览器不安全警告，并支持 PWA 桌面独立快捷方式</p>
+          </div>
+          <a
+            href="/DeskNotify-CA.cer"
+            download="DeskNotify-CA.cer"
+            class="px-3 py-1.5 bg-white hover:bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-700 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 flex-shrink-0"
+          >
+            <span>下载根证书 (.cer)</span>
+          </a>
         </div>
       </div>
 
-      <!-- Tab 2: Settings Form -->
-      <div v-if="activeTab === 'config'" class="p-6 space-y-4">
+      <!-- Tab 2: Level 1 Basic Configuration -->
+      <div v-if="activeTab === 'basic'" class="p-5 sm:p-6 space-y-4">
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">班级名称</label>
           <input
             v-model="config.className"
             type="text"
-            class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="如：高一(3)班"
+            class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            placeholder="如：2907"
+          />
+          <p class="text-[11px] text-slate-400 mt-1">显示在通知窗口头部及教师投递页面标题</p>
+        </div>
+
+        <!-- Notification Duration -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">通知默认展示时长 (秒)</label>
+          <input
+            v-model.number="config.defaultDuration"
+            type="number"
+            min="5"
+            max="3600"
+            class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            placeholder="30"
           />
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">本地服务端口</label>
-            <input
-              v-model.number="config.port"
-              type="number"
-              class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">公网投递口令 (密码)</label>
-            <input
-              v-model="config.publicPassword"
-              type="text"
-              class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="外网访问强制验证"
-            />
-          </div>
-        </div>
-
+        <!-- Notification Sound Settings Section -->
         <div class="pt-2 border-t border-slate-100 space-y-3">
-          <!-- Notification Sound Settings Section -->
           <div class="flex items-center justify-between">
             <div>
               <span class="text-xs font-semibold text-slate-700">桌面弹窗提示音</span>
@@ -117,7 +173,7 @@
               <button
                 type="button"
                 @click="previewSound"
-                class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition shadow-xs"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition shadow-2xs"
                 :class="isPlayingPreview ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'"
               >
                 <Volume2 v-if="!isPlayingPreview" class="w-3.5 h-3.5" />
@@ -142,7 +198,7 @@
                 :class="soundMode === 'preset' ? 'bg-white border-blue-600 text-blue-600 font-semibold shadow-xs ring-1 ring-blue-600' : 'bg-white/70 border-slate-200 text-slate-600 hover:bg-white'"
                 class="py-2 px-2 text-xs rounded-lg border text-center transition"
               >
-                内嵌风格预设
+                内置精选风格
               </button>
               <button
                 type="button"
@@ -158,9 +214,9 @@
             <div v-if="soundMode === 'default'" class="text-xs text-slate-600 bg-white p-3 rounded-lg border border-slate-200/80 space-y-1">
               <div class="flex items-center justify-between">
                 <span class="font-semibold text-slate-800">系统默认提示音 (清脆风铃)</span>
-                <span class="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-medium">已内嵌</span>
+                <span class="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-medium">开箱即用</span>
               </div>
-              <p class="text-[11px] text-slate-400">已完整内嵌于单一可执行程序中，绿色免安装，开箱即播。</p>
+              <p class="text-[11px] text-slate-400">已完整内嵌于单一可执行程序中，绿色免安装。</p>
             </div>
 
             <!-- Mode 2: Presets -->
@@ -172,7 +228,7 @@
                   :key="preset.id"
                   type="button"
                   @click="selectPreset(preset.id)"
-                  :class="config.customSound === preset.id ? 'bg-blue-50 border-blue-500 text-blue-700 font-semibold ring-1 ring-blue-400 shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'"
+                  :class="config.customSound === preset.id ? 'bg-blue-50 border-blue-500 text-blue-700 font-semibold ring-1 ring-blue-400 shadow-2xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'"
                   class="flex items-center justify-between px-2.5 py-2 rounded-lg border text-xs text-left transition"
                 >
                   <span>{{ preset.label }}</span>
@@ -197,7 +253,7 @@
                     type="button"
                     @click="audioFileInputRef?.click()"
                     :disabled="uploadingSound"
-                    class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium border border-slate-200 transition flex items-center gap-1.5 shadow-xs"
+                    class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium border border-slate-200 transition flex items-center gap-1.5 shadow-2xs"
                   >
                     <Upload class="w-3.5 h-3.5" />
                     <span>{{ uploadingSound ? '正在上传...' : '选择本地音频上传' }}</span>
@@ -233,64 +289,212 @@
           </div>
         </div>
 
-        <div class="pt-2 border-t border-slate-100 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-700">启用 frp 公网穿透</span>
-            <input v-model="config.frp.enabled" type="checkbox" class="w-4 h-4 rounded text-blue-600" />
+        <div class="pt-3 flex justify-end">
+          <button
+            @click="saveBasicConfig"
+            :disabled="saving"
+            class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold shadow-xs disabled:opacity-50 transition"
+          >
+            {{ saving ? '保存中...' : '保存基础设置' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 3: Level 2 Security & Public FRP Configuration -->
+      <div v-if="activeTab === 'security'" class="p-5 sm:p-6 space-y-5">
+        <!-- Auth Gate: If NOT unlocked, show password prompt -->
+        <div v-if="!isUnlocked" class="p-6 bg-slate-50 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto">
+          <div class="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl mx-auto flex items-center justify-center">
+            <Lock class="w-6 h-6" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800">安全验证 · 管理员密码</h3>
+            <p class="text-xs text-slate-500 mt-1">修改公网投递口令与暴露服务到公网属于高级设置，请输入管理密码以解锁配置</p>
           </div>
 
-          <div v-if="config.frp.enabled" class="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-            <div class="grid grid-cols-3 gap-2">
-              <div class="col-span-2">
-                <label class="block text-[11px] font-medium text-slate-500 mb-1">frps 服务器地址</label>
-                <input
-                  v-model="config.frp.serverAddr"
-                  type="text"
-                  placeholder="frp.example.com"
-                  class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label class="block text-[11px] font-medium text-slate-500 mb-1">服务器端口</label>
-                <input
-                  v-model.number="config.frp.serverPort"
-                  type="number"
-                  placeholder="7000"
-                  class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-[11px] font-medium text-slate-500 mb-1">Auth Token</label>
-                <input
-                  v-model="config.frp.token"
-                  type="password"
-                  placeholder="通信密钥"
-                  class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label class="block text-[11px] font-medium text-slate-500 mb-1">远程绑定端口</label>
-                <input
-                  v-model.number="config.frp.remotePort"
-                  type="number"
-                  placeholder="如 8921"
-                  class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-            </div>
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-800 text-left">
+            <span>初始默认密码：<strong class="font-mono text-amber-900">123456</strong></span>
+            <span class="block text-[10px] text-amber-700 mt-0.5">采用 bcrypt 安全加盐比对，不以明文存储</span>
           </div>
+
+          <div class="space-y-2">
+            <div class="relative">
+              <input
+                v-model="adminPasswordInput"
+                :type="showAdminPassword ? 'text' : 'password'"
+                @keyup.enter="unlockAdmin"
+                class="w-full px-3 py-2 pr-10 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                placeholder="请输入管理密码"
+              />
+              <button
+                type="button"
+                @click="showAdminPassword = !showAdminPassword"
+                class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+              >
+                <component :is="showAdminPassword ? EyeOff : Eye" class="w-4 h-4" />
+              </button>
+            </div>
+            <p v-if="adminError" class="text-xs text-red-600 text-left">{{ adminError }}</p>
+          </div>
+
+          <button
+            @click="unlockAdmin"
+            :disabled="verifyingAdmin"
+            class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs disabled:opacity-50 transition"
+          >
+            {{ verifyingAdmin ? '正在验证...' : '验证密码并解锁配置' }}
+          </button>
         </div>
 
-        <div class="pt-3 flex justify-end space-x-2">
+        <!-- Unlocked View: Level 2 Settings -->
+        <div v-else class="space-y-5">
+          <div class="flex items-center justify-between bg-emerald-50 border border-emerald-200 p-3 rounded-xl">
+            <div class="flex items-center gap-2">
+              <ShieldCheck class="w-4 h-4 text-emerald-600" />
+              <span class="text-xs font-semibold text-emerald-800">已解锁高级配置权限</span>
+            </div>
+            <button
+              @click="relockAdmin"
+              class="px-2.5 py-1 text-xs bg-white text-slate-600 hover:text-slate-900 border border-emerald-200 rounded-lg shadow-2xs transition"
+            >
+              重新锁定
+            </button>
+          </div>
+
+          <!-- Section 1: Public Delivery Password -->
+          <div class="space-y-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <label class="block text-xs font-semibold text-slate-800">公网投递口令 (修改口令)</label>
+            <input
+              v-model="newPublicPassword"
+              type="password"
+              class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              :placeholder="config.hasPublicPassword ? '留空表示保持原有口令不变' : '设置教师公网投递口令'"
+            />
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              教师在公网或校外扫码投递时须验证此口令。密码保存时将使用 bcrypt 加盐安全哈希，配置文件中绝不保存明文。
+            </p>
+          </div>
+
+          <!-- Section 2: Expose Service to Public Network (Built-in FreeFRP) -->
+          <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-xs font-semibold text-slate-800">暴露服务到公网</span>
+                <p class="text-[11px] text-slate-400 mt-0.5">内置免费 FreeFRP 穿透服务，开启后校外教师可在任意网络扫码投递</p>
+              </div>
+              <input v-model="config.frp.enabled" type="checkbox" class="w-4 h-4 rounded text-blue-600 cursor-pointer" />
+            </div>
+
+            <div v-if="config.frp.enabled" class="space-y-3 bg-white p-3.5 rounded-xl border border-slate-200/80 mt-2">
+              <div class="grid grid-cols-3 gap-2">
+                <div class="col-span-2">
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">FreeFRP 服务器地址</label>
+                  <input
+                    v-model="config.frp.serverAddr"
+                    type="text"
+                    placeholder="frp.freefrp.net"
+                    class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">服务器端口</label>
+                  <input
+                    v-model.number="config.frp.serverPort"
+                    type="number"
+                    placeholder="7000"
+                    class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                  />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">通信密钥 (Token)</label>
+                  <input
+                    v-model="config.frp.token"
+                    type="password"
+                    placeholder="freefrp.net"
+                    class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">远程绑定端口 (首次启动随机固定)</label>
+                  <input
+                    v-model.number="config.frp.remotePort"
+                    type="number"
+                    placeholder="如 28932"
+                    class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div class="text-[11px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200/60">
+                <span>外网访问地址：</span>
+                <span class="font-mono text-blue-600 font-semibold">http://{{ config.frp.serverAddr || 'frp.freefrp.net' }}:{{ config.frp.remotePort }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Modify Admin Password -->
+          <div class="space-y-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <label class="block text-xs font-semibold text-slate-800">修改管理密码</label>
+            <input
+              v-model="newAdminPassword"
+              type="password"
+              class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="留空表示不修改管理密码"
+            />
+            <p class="text-[11px] text-slate-400">用于解锁本安全与公网设置页面的密码。建议修改为仅班主任或管理员掌握的密码。</p>
+          </div>
+
+          <div class="pt-3 flex justify-end">
+            <button
+              @click="saveSecurityConfig"
+              :disabled="saving"
+              class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold shadow-xs disabled:opacity-50 transition"
+            >
+              {{ saving ? '保存中...' : '保存安全与公网配置' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Zoom QR Modal -->
+    <div
+      v-if="zoomedAddress"
+      class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in"
+      @click.self="zoomedAddress = null"
+    >
+      <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-700">{{ zoomedAddress.type }}</span>
+          <button @click="zoomedAddress = null" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700">
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+
+        <div class="flex justify-center p-3 bg-white border border-slate-200 rounded-2xl shadow-xs inline-block mx-auto">
+          <canvas ref="zoomCanvasRef" class="w-56 h-56 rounded-lg block"></canvas>
+        </div>
+
+        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200 font-mono text-xs text-slate-700 select-all break-all">
+          {{ zoomedAddress.url }}
+        </div>
+
+        <div class="flex gap-2">
           <button
-            @click="saveConfig"
-            :disabled="saving"
-            class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold shadow-xs disabled:opacity-50 transition"
+            @click="copyUrl(zoomedAddress.url)"
+            class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition flex items-center justify-center gap-1.5"
           >
-            {{ saving ? '保存中...' : '保存配置并生效' }}
+            <Copy class="w-3.5 h-3.5" />
+            <span>复制连接</span>
+          </button>
+          <button
+            @click="zoomedAddress = null"
+            class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition"
+          >
+            关闭
           </button>
         </div>
       </div>
@@ -299,23 +503,61 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue';
-import { QrCode, Settings, Volume2, VolumeX, Upload, RotateCcw } from 'lucide-vue-next';
+import { ref, computed, onMounted, nextTick, watch } from 'vue';
+import {
+  QrCode,
+  Settings,
+  Lock,
+  Unlock,
+  ShieldCheck,
+  Volume2,
+  VolumeX,
+  Upload,
+  RotateCcw,
+  Copy,
+  X,
+  Eye,
+  EyeOff
+} from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import type { AppConfig } from '../types';
 
-const activeTab = ref<'qrcode' | 'config'>('qrcode');
-const qrCanvasRef = ref<HTMLCanvasElement | null>(null);
+interface AddressItem {
+  id: string;
+  type: string;
+  badge: string;
+  badgeClass: string;
+  url: string;
+  desc: string;
+}
+
+const activeTab = ref<'qrcode' | 'basic' | 'security'>('qrcode');
 const lanIPs = ref<string[]>(['127.0.0.1']);
 const frpPublicUrl = ref('');
 const saving = ref(false);
 
+// Level 2 Security state
+const isUnlocked = ref(false);
+const adminPasswordInput = ref('');
+const showAdminPassword = ref(false);
+const verifyingAdmin = ref(false);
+const adminError = ref('');
+const adminToken = ref('');
+
+const newPublicPassword = ref('');
+const newAdminPassword = ref('');
+
+// Sound preview & upload
 const audioFileInputRef = ref<HTMLInputElement | null>(null);
 const uploadingSound = ref(false);
 const uploadedFileName = ref('');
 const soundMode = ref<'default' | 'preset' | 'custom'>('default');
 const isPlayingPreview = ref(false);
 let previewAudio: HTMLAudioElement | null = null;
+
+// Zoom Modal
+const zoomedAddress = ref<AddressItem | null>(null);
+const zoomCanvasRef = ref<HTMLCanvasElement | null>(null);
 
 const presets = [
   { id: 'glass.mp3', label: '清脆风铃', desc: '灵动通透' },
@@ -326,9 +568,9 @@ const presets = [
 ];
 
 const config = ref<AppConfig>({
-  className: '高一(3)班',
+  className: '2907',
   port: 8920,
-  publicPassword: '',
+  hasPublicPassword: true,
   lanAuthRequired: false,
   defaultDuration: 30,
   soundEnabled: true,
@@ -336,16 +578,102 @@ const config = ref<AppConfig>({
   autoStart: true,
   frp: {
     enabled: false,
-    serverAddr: '',
+    serverAddr: 'frp.freefrp.net',
     serverPort: 7000,
-    token: '',
-    remotePort: 8920
+    token: 'freefrp.net',
+    remotePort: 28932
   }
 });
 
+// Addresses computation following the 192 rule and FRP inclusion
+const displayAddresses = computed<AddressItem[]>(() => {
+  const list: AddressItem[] = [];
+  const basePort = config.value.port || 8920;
+
+  // 192 Rule: If any IP starts with 192., keep ONLY those starting with 192.; otherwise keep all
+  const rawIPs = lanIPs.value && lanIPs.value.length > 0 ? lanIPs.value : ['127.0.0.1'];
+  const has192 = rawIPs.some(ip => ip.startsWith('192.'));
+  const effectiveIPs = has192 ? rawIPs.filter(ip => ip.startsWith('192.')) : rawIPs;
+
+  for (const ip of effectiveIPs) {
+    list.push({
+      id: `http-${ip}`,
+      type: '局域网 HTTP',
+      badge: 'HTTP',
+      badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
+      url: `http://${ip}:${basePort}`,
+      desc: '手机连接同一教室/校园 Wi-Fi 即可扫码直接投递'
+    });
+    list.push({
+      id: `https-${ip}`,
+      type: '局域网 HTTPS (推荐)',
+      badge: 'HTTPS 加密',
+      badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      url: `https://${ip}:${basePort + 1}`,
+      desc: '加密通道，支持在手机上安装 PWA 桌面独立快捷方式'
+    });
+  }
+
+  // Include FRP when enabled
+  if (config.value.frp.enabled) {
+    const publicUrl = frpPublicUrl.value || (config.value.frp.serverAddr && config.value.frp.remotePort ? `http://${config.value.frp.serverAddr}:${config.value.frp.remotePort}` : '');
+    if (publicUrl) {
+      list.push({
+        id: 'frp-public',
+        type: '暴露服务到公网',
+        badge: '公网访问',
+        badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        url: publicUrl,
+        desc: '教师可在校外、家中或使用 4G/5G 手机网络直接扫码投递'
+      });
+    }
+  }
+
+  return list;
+});
+
+const qrCanvases = new Map<string, HTMLCanvasElement>();
+
+function setQrCanvas(url: string, el: any) {
+  if (el) {
+    qrCanvases.set(url, el as HTMLCanvasElement);
+    QRCode.toCanvas(el, url, {
+      width: 112,
+      margin: 1,
+      color: { dark: '#0f172a', light: '#ffffff' }
+    }).catch(() => {});
+  }
+}
+
+watch(displayAddresses, () => {
+  nextTick(() => {
+    for (const item of displayAddresses.value) {
+      const canvas = qrCanvases.get(item.url);
+      if (canvas) {
+        QRCode.toCanvas(canvas, item.url, {
+          width: 112,
+          margin: 1,
+          color: { dark: '#0f172a', light: '#ffffff' }
+        }).catch(() => {});
+      }
+    }
+  });
+}, { deep: true });
+
 onMounted(async () => {
   await fetchStatusAndConfig();
-  renderQRCode();
+  nextTick(() => {
+    for (const item of displayAddresses.value) {
+      const canvas = qrCanvases.get(item.url);
+      if (canvas) {
+        QRCode.toCanvas(canvas, item.url, {
+          width: 112,
+          margin: 1,
+          color: { dark: '#0f172a', light: '#ffffff' }
+        }).catch(() => {});
+      }
+    }
+  });
 });
 
 async function fetchStatusAndConfig() {
@@ -356,8 +684,6 @@ async function fetchStatusAndConfig() {
       config.value = data.config;
       lanIPs.value = data.lanIPs || ['127.0.0.1'];
       frpPublicUrl.value = data.frpPublicUrl || '';
-
-      // Initialize soundMode based on loaded config
       initSoundMode();
     }
   } catch (e) {
@@ -365,6 +691,139 @@ async function fetchStatusAndConfig() {
   }
 }
 
+function openZoom(item: AddressItem) {
+  zoomedAddress.value = item;
+  nextTick(() => {
+    if (zoomCanvasRef.value) {
+      QRCode.toCanvas(zoomCanvasRef.value, item.url, {
+        width: 224,
+        margin: 1,
+        color: { dark: '#0f172a', light: '#ffffff' }
+      }).catch(console.error);
+    }
+  });
+}
+
+async function unlockAdmin() {
+  if (!adminPasswordInput.value) {
+    adminError.value = '请输入管理密码';
+    return;
+  }
+
+  verifyingAdmin.value = true;
+  adminError.value = '';
+
+  try {
+    const res = await fetch('/api/config/verify-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: adminPasswordInput.value })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      adminToken.value = data.adminToken || '';
+      isUnlocked.value = true;
+      adminPasswordInput.value = '';
+    } else {
+      const msg = await res.text();
+      adminError.value = msg || '管理密码错误，请重新输入';
+    }
+  } catch (e) {
+    adminError.value = '网络异常，验证失败';
+  } finally {
+    verifyingAdmin.value = false;
+  }
+}
+
+function relockAdmin() {
+  isUnlocked.value = false;
+  adminToken.value = '';
+  newPublicPassword.value = '';
+  newAdminPassword.value = '';
+}
+
+async function saveBasicConfig() {
+  saving.value = true;
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        className: config.value.className,
+        defaultDuration: config.value.defaultDuration,
+        soundEnabled: config.value.soundEnabled,
+        customSound: config.value.customSound,
+        autoStart: config.value.autoStart
+      })
+    });
+    if (res.ok) {
+      alert('基础设置已成功保存！');
+    } else {
+      alert('保存失败，请检查服务状态');
+    }
+  } catch (e) {
+    alert('保存失败：网络连接异常');
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function saveSecurityConfig() {
+  saving.value = true;
+  try {
+    const payload: any = {
+      frp: config.value.frp
+    };
+    if (newPublicPassword.value.trim()) {
+      payload.newPublicPassword = newPublicPassword.value.trim();
+    }
+    if (newAdminPassword.value.trim()) {
+      payload.newAdminPassword = newAdminPassword.value.trim();
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (adminToken.value) {
+      headers['Authorization'] = `Bearer ${adminToken.value}`;
+    }
+
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      alert('安全与公网配置已成功更新并生效！');
+      newPublicPassword.value = '';
+      newAdminPassword.value = '';
+      await fetchStatusAndConfig();
+    } else {
+      const msg = await res.text();
+      alert(`保存失败：${msg || '权限验证不通过'}`);
+    }
+  } catch (e) {
+    alert('保存失败：网络异常');
+  } finally {
+    saving.value = false;
+  }
+}
+
+function copyUrl(text: string) {
+  navigator.clipboard.writeText(text);
+  alert('已复制到剪贴板：' + text);
+}
+
+async function closeWindow() {
+  try {
+    await fetch('/api/window/settings-hide');
+  } catch {}
+  if (typeof window !== 'undefined' && (window as any).close) {
+    (window as any).close();
+  }
+}
+
+// Sound handlers
 function initSoundMode() {
   const current = (config.value.customSound || '').trim();
   if (!current || current === 'default') {
@@ -492,43 +951,5 @@ function previewSound() {
     isPlayingPreview.value = false;
     previewAudio = null;
   }
-}
-
-function renderQRCode() {
-  nextTick(() => {
-    if (!qrCanvasRef.value) return;
-    const url = frpPublicUrl.value || `http://${lanIPs.value[0] || '127.0.0.1'}:${config.value.port}`;
-    QRCode.toCanvas(qrCanvasRef.value, url, {
-      width: 192,
-      margin: 1,
-      color: { dark: '#0f172a', light: '#ffffff' }
-    });
-  });
-}
-
-async function saveConfig() {
-  saving.value = true;
-  try {
-    const res = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config.value)
-    });
-    if (res.ok) {
-      alert('配置已成功保存！');
-      renderQRCode();
-    } else {
-      alert('保存失败');
-    }
-  } catch (e) {
-    alert('保存失败：网络异常');
-  } finally {
-    saving.value = false;
-  }
-}
-
-function copyUrl(text: string) {
-  navigator.clipboard.writeText(text);
-  alert('已复制到剪贴板：' + text);
 }
 </script>

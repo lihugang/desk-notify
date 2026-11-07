@@ -103,7 +103,7 @@
           ></textarea>
 
           <!-- Uploaded Images Grid -->
-          <div v-if="images.length > 0" class="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
+          <div v-if="images && images.length > 0" class="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
             <div v-for="(img, idx) in images" :key="idx" class="relative group rounded-lg overflow-hidden border border-slate-200 aspect-video bg-slate-100">
               <img :src="img.preview" class="w-full h-full object-cover" />
               <button
@@ -116,7 +116,7 @@
           </div>
 
           <!-- Uploaded Attachments List -->
-          <div v-if="attachments.length > 0" class="mt-3 space-y-2">
+          <div v-if="attachments && attachments.length > 0" class="mt-3 space-y-2">
             <div
               v-for="(file, idx) in attachments"
               :key="idx"
@@ -149,7 +149,7 @@
 
           <button
             @click="handleSubmit"
-            :disabled="submitting || (!textContent.trim() && images.length === 0 && attachments.length === 0)"
+            :disabled="submitting || (!textContent.trim() && (!images || images.length === 0) && (!attachments || attachments.length === 0))"
             class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow-sm text-sm flex items-center gap-1.5 disabled:opacity-50 transition"
           >
             <Send class="w-4 h-4" />
@@ -159,7 +159,7 @@
       </div>
 
       <!-- Delivery History -->
-      <div v-if="history.length > 0" class="space-y-3">
+      <div v-if="history && history.length > 0" class="space-y-3">
         <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider px-1">最近投递历史</h3>
         <div class="space-y-2">
           <div
@@ -174,11 +174,11 @@
               </span>
             </div>
             <p class="text-sm text-slate-800 line-clamp-2 leading-snug">{{ item.content }}</p>
-            <div v-if="item.attachments?.length || item.images?.length" class="flex items-center gap-3 text-xs text-slate-400 pt-1">
-              <span v-if="item.images?.length" class="flex items-center gap-1">
+            <div v-if="(item.attachments && item.attachments.length > 0) || (item.images && item.images.length > 0)" class="flex items-center gap-3 text-xs text-slate-400 pt-1">
+              <span v-if="item.images && item.images.length > 0" class="flex items-center gap-1">
                 <ImageIcon class="w-3.5 h-3.5" /> {{ item.images.length }} 张图片
               </span>
-              <span v-if="item.attachments?.length" class="flex items-center gap-1">
+              <span v-if="item.attachments && item.attachments.length > 0" class="flex items-center gap-1">
                 <Paperclip class="w-3.5 h-3.5" /> {{ item.attachments.length }} 个附件
               </span>
             </div>
@@ -235,7 +235,7 @@ async function checkAuthAndStatus() {
       return;
     }
     const data = await res.json();
-    classroomName.value = data.className || '三年二班';
+    classroomName.value = data.className || '2907';
     wsConnected.value = true;
     authenticated.value = true;
   } catch (e) {
@@ -271,7 +271,8 @@ async function fetchHistory() {
   try {
     const res = await fetch('/api/history');
     if (res.ok) {
-      history.value = await res.json();
+      const data = await res.json();
+      history.value = Array.isArray(data) ? data : [];
     }
   } catch (e) {
     console.warn('获取历史记录失败', e);
@@ -351,7 +352,7 @@ function removeAttachment(idx: number) {
 }
 
 async function handleSubmit() {
-  if (!textContent.value.trim() && images.value.length === 0 && attachments.value.length === 0) return;
+  if (!textContent.value.trim() && (!images.value || images.value.length === 0) && (!attachments.value || attachments.value.length === 0)) return;
   submitting.value = true;
 
   try {
