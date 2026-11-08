@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/lihugang/desk-notify/core/pkg/api"
-	"github.com/lihugang/desk-notify/core/pkg/cert"
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/lihugang/desk-notify/core/pkg/desktop"
@@ -29,12 +28,7 @@ func main() {
 	logger.Infof("==================================================")
 	logger.Infof("[DeskNotify] 运行日志目录: %s", logsDir)
 
-	// 1. Ensure Lihugang Root CA is installed (auto-elevates via UAC on Windows first run)
-	if err := cert.EnsureRootCAInstalled(); err != nil {
-		logger.Warnf("[DeskNotify] 根证书自动安装未完成: %v", err)
-	}
-
-	// 2. Initialize Configuration
+	// 1. Initialize Configuration
 	cfgMgr, err := config.NewManager()
 	if err != nil {
 		logger.Errorf("Fatal: failed to initialize config manager: %v", err)

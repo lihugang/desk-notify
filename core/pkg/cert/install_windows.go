@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -102,9 +103,14 @@ func IsRootCAInstalled() bool {
 	return false
 }
 
+var installMu sync.Mutex
+
 // EnsureRootCAInstalled automatically prompts for UAC elevation to install
 // the embedded Lihugang Root CA into the Windows certificate store if not already present.
 func EnsureRootCAInstalled() error {
+	installMu.Lock()
+	defer installMu.Unlock()
+
 	if IsRootCAInstalled() {
 		return nil
 	}

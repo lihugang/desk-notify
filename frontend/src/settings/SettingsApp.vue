@@ -31,16 +31,6 @@
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <button
-            type="button"
-            @click="pinToTaskbar"
-            :disabled="pinningTaskbar"
-            class="px-2.5 py-1 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium transition shadow-2xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
-            title="固定到任务栏"
-          >
-            <Pin class="w-3.5 h-3.5 text-blue-600" />
-            <span>{{ pinningTaskbar ? '正在固定...' : '固定到任务栏' }}</span>
-          </button>
-          <button
             @click="isFirstRun = false"
             class="text-blue-400 hover:text-blue-600 p-1 rounded-md transition"
             title="关闭提示"
@@ -157,19 +147,9 @@
                 {{ caInstalled ? '✓ 本机已受信任' : '未受信任' }}
               </span>
             </div>
-            <p class="text-[11px] text-indigo-600/80">信任证书后可消除浏览器不安全提示，支持 PWA 独立窗口，外接设备可下载后导入</p>
+            <p class="text-[11px] text-indigo-600/80">软件启动时会自动检查并信任根证书。如需在外接手机或平板安装证书，请点击右侧下载</p>
           </div>
           <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
-            <button
-              type="button"
-              @click="trustRootCA"
-              :disabled="trustingCA"
-              class="px-3 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              :class="caInstalled ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-indigo-600 hover:bg-indigo-700 text-white'"
-            >
-              <ShieldCheck class="w-3.5 h-3.5" />
-              <span>{{ trustingCA ? '正在信任...' : (caInstalled ? '重新信任证书' : '一键信任证书') }}</span>
-            </button>
             <a
               href="/DeskNotify-CA.cer"
               download="DeskNotify-CA.cer"
@@ -494,50 +474,7 @@
           </div>
         </div>
 
-        <!-- Autostart on Boot Section -->
-        <div class="pt-3 border-t border-slate-100 space-y-2">
-          <div class="flex items-center justify-between">
-            <div>
-              <span class="text-xs font-semibold text-slate-700">开机自动启动</span>
-              <p class="text-[11px] text-slate-400 mt-0.5">电脑开机后 DeskNotify 自动在后台静默运行并常驻系统托盘，随时待命接收通知</p>
-            </div>
-            <input
-              v-model="config.autoStart"
-              type="checkbox"
-              class="w-4 h-4 rounded text-blue-600 cursor-pointer"
-            />
-          </div>
-        </div>
 
-        <!-- Shortcuts & Pinning Section -->
-        <div class="pt-3 border-t border-slate-100 space-y-2">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <span class="text-xs font-semibold text-slate-700">桌面与任务栏快捷方式</span>
-              <p class="text-[11px] text-slate-400 mt-0.5">为方便讲台老师与班干部快速唤出传纸条，可将应用添加到桌面或固定到任务栏</p>
-            </div>
-            <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
-              <button
-                type="button"
-                @click="createDesktopShortcut"
-                :disabled="creatingShortcut"
-                class="px-3 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
-              >
-                <Monitor class="w-3.5 h-3.5 text-blue-600" />
-                <span>{{ creatingShortcut ? '正在创建...' : '添加到桌面快捷方式' }}</span>
-              </button>
-              <button
-                type="button"
-                @click="pinToTaskbar"
-                :disabled="pinningTaskbar"
-                class="px-3 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
-              >
-                <Pin class="w-3.5 h-3.5 text-blue-600" />
-                <span>{{ pinningTaskbar ? '正在固定...' : '固定到底部任务栏' }}</span>
-              </button>
-            </div>
-          </div>
-        </div>
 
         <div class="pt-3 flex justify-end">
           <button
@@ -916,8 +853,6 @@ import {
   FolderOpen,
   FileText,
   Type,
-  Pin,
-  Monitor,
   Download
 } from 'lucide-vue-next';
 import QRCode from 'qrcode';
@@ -1550,64 +1485,4 @@ function copyLogsDir() {
 }
 
 const caInstalled = ref(false);
-const trustingCA = ref(false);
-
-async function trustRootCA() {
-  trustingCA.value = true;
-  try {
-    const res = await fetch('/api/cert/trust', { method: 'POST' });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.installed) {
-      caInstalled.value = true;
-      alert('已成功安装并信任传纸条作者统一根证书！\n局域网 HTTPS 和 Windows 系统现已完全信任本程序。');
-    } else {
-      const err = data.error || (data.message ? data.message : '提权请求被取消或失败');
-      alert(`证书信任安装提示：${err}`);
-      if (data.installed) {
-        caInstalled.value = true;
-      }
-    }
-  } catch (err: any) {
-    alert(`信任证书请求异常：${err.message || '网络连接失败'}`);
-  } finally {
-    trustingCA.value = false;
-  }
-}
-
-const creatingShortcut = ref(false);
-
-async function createDesktopShortcut() {
-  creatingShortcut.value = true;
-  try {
-    const res = await fetch('/api/window/desktop-shortcut', { method: 'POST' });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) {
-      alert('已成功在电脑桌面创建【传纸条】快捷方式！');
-    } else {
-      alert(`创建桌面快捷方式失败：${data.error || '系统权限不足'}`);
-    }
-  } catch (err: any) {
-    alert(`创建桌面快捷方式失败：${err.message || '系统错误'}`);
-  } finally {
-    creatingShortcut.value = false;
-  }
-}
-
-const pinningTaskbar = ref(false);
-
-async function pinToTaskbar() {
-  pinningTaskbar.value = true;
-  try {
-    const res = await fetch('/api/window/pin-taskbar', { method: 'POST' });
-    if (!res.ok) {
-      throw new Error(`状态码 ${res.status}`);
-    }
-    const data = await res.json().catch(() => ({}));
-    alert(data.message || '已触发将 DeskNotify 固定到底部任务栏。\n如果系统未自动显示在任务栏，您也可以在桌面图标上右键选择【固定到任务栏】。');
-  } catch (err: any) {
-    alert(`固定到任务栏请求失败：${err.message || '系统错误'}`);
-  } finally {
-    pinningTaskbar.value = false;
-  }
-}
 </script>

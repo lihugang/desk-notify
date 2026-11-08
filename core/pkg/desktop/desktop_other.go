@@ -32,8 +32,7 @@ func (m *headlessManager) Run(cfgMgr *config.Manager) error {
 	signal.Notify(m.sigChan, os.Interrupt, syscall.SIGTERM)
 	logger.Infof("[DeskNotify] 运行在 Web Server 渲染模式 (测试/开发环境)")
 	if cfgMgr.IsFirstRun() {
-		logger.Infof("[DeskNotify] 首次启动应用，自动固定到任务栏并弹出设置页: http://localhost:%d/settings", cfgMgr.Get().Port)
-		_ = m.PinToTaskbar()
+		logger.Infof("[DeskNotify] 首次启动应用，打开设置页: http://localhost:%d/settings", cfgMgr.Get().Port)
 		m.OpenSettings()
 		_ = cfgMgr.MarkFirstRunComplete()
 	}

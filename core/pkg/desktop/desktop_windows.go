@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/lihugang/desk-notify/core/pkg/cert"
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/lihugang/desk-notify/core/pkg/logger"
@@ -42,13 +43,6 @@ func newManager() Manager {
 func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	m.cfgMgr = cfgMgr
 	cfg := cfgMgr.Get()
-
-	// Sync Windows autostart on application run
-	if cfg.AutoStart {
-		if err := m.SetAutoStart(true); err != nil {
-			logger.Warnf("[DeskNotify] 同步开机自启失败: %v", err)
-		}
-	}
 
 	m.notifier = notifications.New()
 
@@ -151,15 +145,10 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 		_ = m.cfgMgr.MarkFirstRunComplete()
 	})
 
+	// 应用启动时自动环境检查与补全：证书信任、开机自启、桌面快捷方式、底部任务栏固定
+	go m.checkAndApplyStartupDefaults()
+
 	if isFirstRun {
-		go func() {
-			if err := m.CreateDesktopShortcut(); err != nil {
-				logger.Warnf("[DeskNotify] 首次启动创建桌面快捷方式提示: %v", err)
-			}
-			if err := m.PinToTaskbar(); err != nil {
-				logger.Warnf("[DeskNotify] 首次启动固定到底部任务栏提示: %v", err)
-			}
-		}()
 		m.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(event *application.ApplicationEvent) {
 			m.OpenSettings()
 			_ = m.cfgMgr.MarkFirstRunComplete()
@@ -210,22 +199,6 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 
 	menu.Add("班级设置 / 二维码").OnClick(func(ctx *application.Context) {
 		m.OpenSettings()
-	})
-
-	menu.Add("添加到桌面快捷方式").OnClick(func(ctx *application.Context) {
-		go func() {
-			if err := m.CreateDesktopShortcut(); err != nil {
-				logger.Warnf("[DeskNotify] 创建桌面快捷方式提示: %v", err)
-			}
-		}()
-	})
-
-	menu.Add("固定到底部任务栏").OnClick(func(ctx *application.Context) {
-		go func() {
-			if err := m.PinToTaskbar(); err != nil {
-				logger.Warnf("[DeskNotify] 固定到底部任务栏提示: %v", err)
-			}
-		}()
 	})
 
 	menu.Add("打开通知存档目录").OnClick(func(ctx *application.Context) {
@@ -526,6 +499,43 @@ func (m *windowsManager) IsAutoStartEnabled() bool {
 	return IsWindowsAutoStartEnabled()
 }
 
+// checkAndApplyStartupDefaults executes the startup verification routine for Windows:
+// 1. Root CA certificate trust (EnsureRootCAInstalled)
+// 2. Autostart on boot (SetAutoStart)
+// 3. Desktop shortcut (CreateDesktopShortcut)
+// 4. Pin to bottom taskbar (PinToTaskbar)
+func (m *windowsManager) checkAndApplyStartupDefaults() {
+	logger.Infof("[DeskNotify] 正在执行应用启动环境检查 (证书信任 / 开机自启 / 桌面快捷方式 / 任务栏固定)...")
+
+	// 1. 证书信任检查与自动补全
+	if err := cert.EnsureRootCAInstalled(); err != nil {
+		logger.Warnf("[DeskNotify] 启动检查 - 根证书信任检查提示: %v", err)
+	} else {
+		logger.Infof("[DeskNotify] 启动检查 - 根证书已受系统信任")
+	}
+
+	// 2. 开机自启检查与自动配置
+	if err := m.SetAutoStart(true); err != nil {
+		logger.Warnf("[DeskNotify] 启动检查 - 开机自启配置失败: %v", err)
+	} else {
+		logger.Infof("[DeskNotify] 启动检查 - 开机自启已生效")
+	}
+
+	// 3. 桌面快捷方式检查与创建
+	if err := m.CreateDesktopShortcut(); err != nil {
+		logger.Warnf("[DeskNotify] 启动检查 - 桌面快捷方式检查提示: %v", err)
+	} else {
+		logger.Infof("[DeskNotify] 启动检查 - 桌面快捷方式已就绪")
+	}
+
+	// 4. 底部任务栏固定检查与固定
+	if err := m.PinToTaskbar(); err != nil {
+		logger.Warnf("[DeskNotify] 启动检查 - 底部任务栏固定提示: %v", err)
+	} else {
+		logger.Infof("[DeskNotify] 启动检查 - 底部任务栏固定检查完成")
+	}
+}
+
 func (m *windowsManager) Quit() {
 	if m.app != nil {
 		m.app.Quit()
@@ -599,12 +609,24 @@ if (-not (Test-Path $desktopDir)) {
 }
 
 $shortcutPath = Join-Path $desktopDir '传纸条.lnk'
-$shortcut = $wsh.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $target
-$shortcut.WorkingDirectory = Split-Path $target
-$shortcut.IconLocation = "$target,0"
-$shortcut.Description = "DeskNotify 传纸条 - 班级桌面通知"
-$shortcut.Save()
+$needSave = $true
+if (Test-Path $shortcutPath) {
+    try {
+        $exist = $wsh.CreateShortcut($shortcutPath)
+        if ($exist.TargetPath -eq $target) {
+            $needSave = $false
+        }
+    } catch {}
+}
+
+if ($needSave) {
+    $shortcut = $wsh.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $target
+    $shortcut.WorkingDirectory = Split-Path $target
+    $shortcut.IconLocation = "$target,0"
+    $shortcut.Description = "DeskNotify 传纸条 - 班级桌面通知"
+    $shortcut.Save()
+}
 
 # Also create in Start Menu Programs for convenience
 $appData = [System.Environment]::GetFolderPath('ApplicationData')
@@ -752,6 +774,42 @@ $target = '%s'
 $appData = [System.Environment]::GetFolderPath('ApplicationData')
 $programsDir = Join-Path $appData 'Microsoft\Windows\Start Menu\Programs'
 $shortcutPath = Join-Path $programsDir 'DeskNotify.lnk'
+$taskbarDir = Join-Path $appData 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
+
+# 0. Check if already pinned in TaskBar folder or via Shell verbs
+$alreadyPinned = $false
+if (Test-Path $taskbarDir) {
+    if ((Test-Path (Join-Path $taskbarDir 'DeskNotify.lnk')) -or (Test-Path (Join-Path $taskbarDir '传纸条.lnk'))) {
+        $alreadyPinned = $true
+    }
+}
+
+if (-not $alreadyPinned) {
+    try {
+        $shellCheck = New-Object -ComObject Shell.Application
+        foreach ($checkPath in @($shortcutPath, $target)) {
+            if (Test-Path $checkPath) {
+                $checkFolder = $shellCheck.Namespace((Split-Path $checkPath))
+                $checkItem = $checkFolder.ParseName((Split-Path $checkPath -Leaf))
+                if ($checkItem) {
+                    foreach ($v in $checkItem.Verbs()) {
+                        $vname = $v.Name -replace '&', ''
+                        if ($vname -match "unpin|从任务栏取消固定|从任务栏解锁") {
+                            $alreadyPinned = $true
+                            break
+                        }
+                    }
+                }
+            }
+            if ($alreadyPinned) { break }
+        }
+    } catch {}
+}
+
+if ($alreadyPinned) {
+    Write-Output "ALREADY_PINNED"
+    exit 0
+}
 
 # 1. Ensure Start Menu Programs directory exists and create shortcut
 if (-not (Test-Path $programsDir)) {
@@ -825,7 +883,7 @@ if (-not $pinned) {
                 if ($item) {
                     foreach ($verb in $item.Verbs()) {
                         $vname = $verb.Name -replace '&', ''
-                        if ($vname -match "taskbar|任务栏|锁定到任务栏|固定到任务栏|Pin to taskbar") {
+                        if ($vname -notmatch "unpin|从任务栏|取消" -and $vname -match "固定到任务栏|锁定到任务栏|Pin to taskbar") {
                             $verb.DoIt()
                             $pinned = $true
                             break
