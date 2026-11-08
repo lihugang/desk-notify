@@ -21,7 +21,7 @@ type Manager interface {
 	OpenLogsDir() error
 	OpenFile(filePath string) error
 	RevealFile(filePath string) error
-	PinToTaskbar() error
+	PinToTaskbar(manual ...bool) error
 	CreateDesktopShortcut() error
 	SetAutoStart(enabled bool) error
 	IsAutoStartEnabled() bool

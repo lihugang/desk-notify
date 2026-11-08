@@ -201,6 +201,22 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 		m.OpenSettings()
 	})
 
+	menu.Add("添加到桌面快捷方式").OnClick(func(ctx *application.Context) {
+		go func() {
+			if err := m.CreateDesktopShortcut(); err != nil {
+				logger.Warnf("[DeskNotify] 创建桌面快捷方式提示: %v", err)
+			}
+		}()
+	})
+
+	menu.Add("固定到底部任务栏").OnClick(func(ctx *application.Context) {
+		go func() {
+			if err := m.PinToTaskbar(true); err != nil {
+				logger.Warnf("[DeskNotify] 固定到底部任务栏提示: %v", err)
+			}
+		}()
+	})
+
 	menu.Add("打开通知存档目录").OnClick(func(ctx *application.Context) {
 		if err := m.OpenArchiveDir(); err != nil {
 			logger.Errorf("[DeskNotify] 打开通知存档目录失败: %v", err)
@@ -483,8 +499,12 @@ func (m *windowsManager) RevealFile(filePath string) error {
 	return revealFile(filePath)
 }
 
-func (m *windowsManager) PinToTaskbar() error {
-	return PinSelfToTaskbar()
+func (m *windowsManager) PinToTaskbar(manual ...bool) error {
+	isManual := false
+	if len(manual) > 0 && manual[0] {
+		isManual = true
+	}
+	return PinSelfToTaskbar(isManual)
 }
 
 func (m *windowsManager) CreateDesktopShortcut() error {
@@ -529,7 +549,7 @@ func (m *windowsManager) checkAndApplyStartupDefaults() {
 	}
 
 	// 4. 底部任务栏固定检查与固定
-	if err := m.PinToTaskbar(); err != nil {
+	if err := m.PinToTaskbar(false); err != nil {
 		logger.Warnf("[DeskNotify] 启动检查 - 底部任务栏固定提示: %v", err)
 	} else {
 		logger.Infof("[DeskNotify] 启动检查 - 底部任务栏固定检查完成")
@@ -632,13 +652,17 @@ if ($needSave) {
 $appData = [System.Environment]::GetFolderPath('ApplicationData')
 $programsDir = Join-Path $appData 'Microsoft\Windows\Start Menu\Programs'
 if (Test-Path $programsDir) {
-    $menuLnk = Join-Path $programsDir 'DeskNotify.lnk'
-    $s2 = $wsh.CreateShortcut($menuLnk)
-    $s2.TargetPath = $target
-    $s2.WorkingDirectory = Split-Path $target
-    $s2.IconLocation = "$target,0"
-    $s2.Description = "DeskNotify 传纸条 - 班级桌面通知"
-    $s2.Save()
+    foreach ($menuName in @('传纸条.lnk', 'DeskNotify.lnk')) {
+        try {
+            $menuLnk = Join-Path $programsDir $menuName
+            $s2 = $wsh.CreateShortcut($menuLnk)
+            $s2.TargetPath = $target
+            $s2.WorkingDirectory = Split-Path $target
+            $s2.IconLocation = "$target,0"
+            $s2.Description = "DeskNotify 传纸条 - 班级桌面通知"
+            $s2.Save()
+        } catch {}
+    }
 }
 
 Write-Output "SUCCESS"
@@ -755,8 +779,26 @@ func openDirectory(dir string) error {
 	return nil
 }
 
+func getDesktopDir() string {
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		desktop := filepath.Join(home, "Desktop")
+		if fi, err := os.Stat(desktop); err == nil && fi.IsDir() {
+			return desktop
+		}
+	}
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile != "" {
+		desktop := filepath.Join(userProfile, "Desktop")
+		if fi, err := os.Stat(desktop); err == nil && fi.IsDir() {
+			return desktop
+		}
+	}
+	return ""
+}
+
 // PinSelfToTaskbar pins the application executable or shortcut to the Windows taskbar.
-func PinSelfToTaskbar() error {
+func PinSelfToTaskbar(revealOnManual bool) error {
 	exePath, err := os.Executable()
 	if err != nil {
 		logger.Errorf("[DeskNotify] 固定任务栏失败: 无法获取可执行文件路径: %v", err)
@@ -770,65 +812,81 @@ func PinSelfToTaskbar() error {
 	logger.Infof("[DeskNotify] 正在将应用固定到底部任务栏: %s", cleanExePath)
 
 	psScript := fmt.Sprintf(`
+$ErrorActionPreference = 'SilentlyContinue'
 $target = '%s'
 $appData = [System.Environment]::GetFolderPath('ApplicationData')
+$desktopDir = [System.Environment]::GetFolderPath('Desktop')
+if (-not $desktopDir -and $env:USERPROFILE) {
+    $desktopDir = Join-Path $env:USERPROFILE 'Desktop'
+}
 $programsDir = Join-Path $appData 'Microsoft\Windows\Start Menu\Programs'
-$shortcutPath = Join-Path $programsDir 'DeskNotify.lnk'
 $taskbarDir = Join-Path $appData 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
 
-# 0. Check if already pinned in TaskBar folder or via Shell verbs
-$alreadyPinned = $false
-if (Test-Path $taskbarDir) {
-    if ((Test-Path (Join-Path $taskbarDir 'DeskNotify.lnk')) -or (Test-Path (Join-Path $taskbarDir '传纸条.lnk'))) {
-        $alreadyPinned = $true
-    }
-}
+$deskShortcut = if ($desktopDir) { Join-Path $desktopDir '传纸条.lnk' } else { $null }
+$shortcutZh = Join-Path $programsDir '传纸条.lnk'
+$shortcutEn = Join-Path $programsDir 'DeskNotify.lnk'
 
-if (-not $alreadyPinned) {
+# 1. Helper function: verify if truly registered in Explorer Taskband registry
+function Test-IsTrulyPinned {
     try {
-        $shellCheck = New-Object -ComObject Shell.Application
-        foreach ($checkPath in @($shortcutPath, $target)) {
-            if (Test-Path $checkPath) {
-                $checkFolder = $shellCheck.Namespace((Split-Path $checkPath))
-                $checkItem = $checkFolder.ParseName((Split-Path $checkPath -Leaf))
-                if ($checkItem) {
-                    foreach ($v in $checkItem.Verbs()) {
-                        $vname = $v.Name -replace '&', ''
-                        if ($vname -match "unpin|从任务栏取消固定|从任务栏解锁") {
-                            $alreadyPinned = $true
-                            break
-                        }
-                    }
-                }
+        $tbKey = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband" -ErrorAction SilentlyContinue
+        if ($tbKey -and $tbKey.Favorites) {
+            $fav = $tbKey.Favorites
+            $favStr = [System.Text.Encoding]::Unicode.GetString($fav)
+            $favAscii = [System.Text.Encoding]::ASCII.GetString($fav)
+            if ($favStr -match "DeskNotify" -or $favAscii -match "DeskNotify" -or $favStr -match "传纸条" -or $favStr -match [regex]::Escape($target)) {
+                return $true
             }
-            if ($alreadyPinned) { break }
         }
     } catch {}
+    return $false
 }
 
-if ($alreadyPinned) {
+# 2. If already truly pinned in registry, exit early
+if (Test-IsTrulyPinned) {
     Write-Output "ALREADY_PINNED"
     exit 0
 }
 
-# 1. Ensure Start Menu Programs directory exists and create shortcut
+# 3. Clean up any stale shortcut in User Pinned\TaskBar from previous failed attempts
+if (Test-Path $taskbarDir) {
+    Remove-Item -Path (Join-Path $taskbarDir 'DeskNotify.lnk') -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $taskbarDir '传纸条.lnk') -Force -ErrorAction SilentlyContinue
+}
+
+# 4. Ensure Start Menu Programs directory exists and create shortcuts
 if (-not (Test-Path $programsDir)) {
     New-Item -ItemType Directory -Path $programsDir -Force | Out-Null
 }
 
 $wsh = New-Object -ComObject WScript.Shell
-try {
-    $s = $wsh.CreateShortcut($shortcutPath)
-    $s.TargetPath = $target
-    $s.WorkingDirectory = Split-Path $target
-    $s.IconLocation = "$target,0"
-    $s.Description = "DeskNotify 传纸条 - 班级桌面通知"
-    $s.Save()
-} catch {}
+$targetDir = Split-Path $target
 
-# 2. Modern Windows (Windows 10 / 11) using CommandStore ExplorerCommandHandler via .NET Registry API
-# (Note: Using .NET Registry directly avoids PowerShell -Path wildcard expansion bug with '*')
+foreach ($menuPath in @($shortcutZh, $shortcutEn)) {
+    try {
+        $s = $wsh.CreateShortcut($menuPath)
+        $s.TargetPath = $target
+        $s.WorkingDirectory = $targetDir
+        $s.IconLocation = "$target,0"
+        $s.Description = "DeskNotify 传纸条 - 班级桌面通知"
+        $s.Save()
+    } catch {}
+}
+
+if ($deskShortcut) {
+    try {
+        $d = $wsh.CreateShortcut($deskShortcut)
+        $d.TargetPath = $target
+        $d.WorkingDirectory = $targetDir
+        $d.IconLocation = "$target,0"
+        $d.Description = "DeskNotify 传纸条 - 班级桌面通知"
+        $d.Save()
+    } catch {}
+}
+
 $pinned = $false
+
+# 5. Method A: CommandStore ExplorerCommandHandler (Windows 10 & supported Windows 11)
 $cmdKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell\Windows.taskbarpin"
 if (Test-Path $cmdKey) {
     try {
@@ -838,31 +896,51 @@ if (Test-Path $cmdKey) {
             if ($regClasses) {
                 $starKey = $regClasses.CreateSubKey("*", $true)
                 $shellKey = $starKey.CreateSubKey("shell", $true)
-                $verbKey = $shellKey.CreateSubKey("{PIN}", $true)
-                $verbKey.SetValue("ExplorerCommandHandler", $handler)
-                $verbKey.Close()
+
+                $verb1 = $shellKey.CreateSubKey("{PIN}", $true)
+                $verb1.SetValue("ExplorerCommandHandler", $handler)
+                $verb1.Close()
+
+                $verb2 = $shellKey.CreateSubKey("{:}", $true)
+                $verb2.SetValue("ExplorerCommandHandler", $handler)
+                $verb2.Close()
+
                 $shellKey.Close()
                 $starKey.Close()
                 $regClasses.Close()
 
+                Start-Sleep -Milliseconds 250
+
                 try {
                     $shell = New-Object -ComObject Shell.Application
-                    foreach ($itemPath in @($shortcutPath, $target)) {
+                    $candidates = @($shortcutZh, $shortcutEn, $target)
+                    if ($deskShortcut) { $candidates += $deskShortcut }
+
+                    foreach ($itemPath in $candidates) {
                         if (Test-Path $itemPath) {
                             $folder = $shell.Namespace((Split-Path $itemPath))
                             $item = $folder.ParseName((Split-Path $itemPath -Leaf))
                             if ($item) {
-                                $item.InvokeVerb("{PIN}")
-                                $pinned = $true
-                                break
+                                try { $item.InvokeVerb("{PIN}") } catch {}
+                                try { $item.InvokeVerb("{:}") } catch {}
+                                Start-Sleep -Milliseconds 400
+                                if (Test-IsTrulyPinned) {
+                                    $pinned = $true
+                                    break
+                                }
                             }
                         }
+                    }
+                    Start-Sleep -Milliseconds 1200
+                    if (Test-IsTrulyPinned) {
+                        $pinned = $true
                     }
                 } finally {
                     try {
                         $regShell = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\Classes\*\shell", $true)
                         if ($regShell) {
                             $regShell.DeleteSubKeyTree("{PIN}", $false)
+                            $regShell.DeleteSubKeyTree("{:}", $false)
                             $regShell.Close()
                         }
                     } catch {}
@@ -872,48 +950,71 @@ if (Test-Path $cmdKey) {
     } catch {}
 }
 
-# 3. Fallback for older Windows / localized shell verb
-if (-not $pinned) {
+# 6. Method B: Standard Shell Verbs fallback
+if (-not $pinned -and -not (Test-IsTrulyPinned)) {
     try {
         $shell = New-Object -ComObject Shell.Application
-        foreach ($itemPath in @($shortcutPath, $target)) {
+        $candidates = @($shortcutZh, $shortcutEn, $target)
+        if ($deskShortcut) { $candidates += $deskShortcut }
+
+        foreach ($itemPath in $candidates) {
             if (Test-Path $itemPath) {
                 $folder = $shell.Namespace((Split-Path $itemPath))
                 $item = $folder.ParseName((Split-Path $itemPath -Leaf))
                 if ($item) {
                     foreach ($verb in $item.Verbs()) {
                         $vname = $verb.Name -replace '&', ''
-                        if ($vname -notmatch "unpin|从任务栏|取消" -and $vname -match "固定到任务栏|锁定到任务栏|Pin to taskbar") {
-                            $verb.DoIt()
-                            $pinned = $true
-                            break
+                        if ($vname -notmatch "unpin|从任务栏|取消|解锁" -and $vname -match "固定到任务栏|锁定到任务栏|Pin to taskbar") {
+                            try {
+                                $verb.DoIt()
+                                Start-Sleep -Milliseconds 1000
+                                if (Test-IsTrulyPinned) {
+                                    $pinned = $true
+                                    break
+                                }
+                            } catch {}
                         }
                     }
                 }
-                if ($pinned) { break }
+                if ($pinned -or (Test-IsTrulyPinned)) { break }
             }
         }
     } catch {}
 }
 
-# 4. Also place shortcut in User Pinned\TaskBar directory as fallback
-$taskbarDir = Join-Path $appData 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
-if (Test-Path $taskbarDir) {
+# 7. Method C: shell:AppsFolder virtual namespace fallback
+if (-not $pinned -and -not (Test-IsTrulyPinned)) {
     try {
-        $tbLnk = Join-Path $taskbarDir 'DeskNotify.lnk'
-        $s3 = $wsh.CreateShortcut($tbLnk)
-        $s3.TargetPath = $target
-        $s3.WorkingDirectory = Split-Path $target
-        $s3.IconLocation = "$target,0"
-        $s3.Description = "DeskNotify 传纸条 - 班级桌面通知"
-        $s3.Save()
+        $shell = New-Object -ComObject Shell.Application
+        $appsFolder = $shell.Namespace('shell:AppsFolder')
+        if ($appsFolder) {
+            foreach ($appItem in $appsFolder.Items()) {
+                if ($appItem.Name -match "传纸条|DeskNotify") {
+                    foreach ($verb in $appItem.Verbs()) {
+                        $vname = $verb.Name -replace '&', ''
+                        if ($vname -notmatch "unpin|从任务栏|取消|解锁" -and $vname -match "固定到任务栏|锁定到任务栏|Pin to taskbar") {
+                            try {
+                                $verb.DoIt()
+                                Start-Sleep -Milliseconds 1000
+                                if (Test-IsTrulyPinned) {
+                                    $pinned = $true
+                                    break
+                                }
+                            } catch {}
+                        }
+                    }
+                }
+                if ($pinned -or (Test-IsTrulyPinned)) { break }
+            }
+        }
     } catch {}
 }
 
-if ($pinned) {
+# 8. Report final status
+if ($pinned -or (Test-IsTrulyPinned)) {
     Write-Output "SUCCESS"
 } else {
-    Write-Output "DONE"
+    Write-Output "NEED_MANUAL_PIN"
 }
 `, cleanExePath)
 
@@ -923,11 +1024,30 @@ if ($pinned) {
 	}
 
 	out, err := cmd.CombinedOutput()
-	outputStr := string(out)
+	outputStr := strings.TrimSpace(string(out))
 	if err != nil {
-		logger.Warnf("[DeskNotify] 固定任务栏脚本执行: %v (输出: %s)", err, outputStr)
+		logger.Warnf("[DeskNotify] 固定任务栏脚本执行提示: %v (输出: %s)", err, outputStr)
+	}
+
+	if strings.Contains(outputStr, "ALREADY_PINNED") {
+		logger.Infof("[DeskNotify] 应用已固定在底部任务栏，无需重复固定")
+		return nil
+	} else if strings.Contains(outputStr, "SUCCESS") {
+		logger.Infof("[DeskNotify] 已成功将应用固定到底部任务栏")
 		return nil
 	}
-	logger.Infof("[DeskNotify] 固定任务栏执行结果: %s", outputStr)
-	return nil
+
+	logger.Warnf("[DeskNotify] 任务栏未自动固定 (当前系统安全策略限制静默固定)，已创建桌面与开始菜单快捷方式")
+	if revealOnManual {
+		desktopDir := getDesktopDir()
+		if desktopDir != "" {
+			shortcutPath := filepath.Join(desktopDir, "传纸条.lnk")
+			if fi, statErr := os.Stat(shortcutPath); statErr == nil && !fi.IsDir() {
+				_ = revealFile(shortcutPath)
+			}
+		}
+		return fmt.Errorf("当前 Windows 系统安全策略限制了自动静默固定任务栏。已在桌面为您创建并高亮选中【传纸条】快捷方式，请直接在选中的图标上右键选择【固定到任务栏】")
+	}
+
+	return fmt.Errorf("系统安全策略限制了静默固定任务栏，已准备好桌面与开始菜单快捷方式")
 }

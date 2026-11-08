@@ -117,7 +117,7 @@ func (m *headlessManager) RevealFile(filePath string) error {
 	return revealFile(filePath)
 }
 
-func (m *headlessManager) PinToTaskbar() error {
+func (m *headlessManager) PinToTaskbar(manual ...bool) error {
 	logger.Infof("[DeskNotify] 固定到任务栏: 非 Windows 系统环境跳过")
 	return nil
 }

@@ -45,7 +45,7 @@ func (m *mockDesktopManager) RevealFile(filePath string) error {
 	m.revealedFile = filePath
 	return nil
 }
-func (m *mockDesktopManager) PinToTaskbar() error { return nil }
+func (m *mockDesktopManager) PinToTaskbar(manual ...bool) error { return nil }
 func (m *mockDesktopManager) CreateDesktopShortcut() error { return nil }
 func (m *mockDesktopManager) SetAutoStart(enabled bool) error { return nil }
 func (m *mockDesktopManager) IsAutoStartEnabled() bool { return false }

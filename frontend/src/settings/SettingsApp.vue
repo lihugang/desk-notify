@@ -31,6 +31,16 @@
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <button
+            type="button"
+            @click="pinToTaskbar"
+            :disabled="pinningTaskbar"
+            class="px-2.5 py-1 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium transition shadow-2xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            title="固定到任务栏"
+          >
+            <Pin class="w-3.5 h-3.5 text-blue-600" />
+            <span>{{ pinningTaskbar ? '正在固定...' : '固定到任务栏' }}</span>
+          </button>
+          <button
             @click="isFirstRun = false"
             class="text-blue-400 hover:text-blue-600 p-1 rounded-md transition"
             title="关闭提示"
@@ -474,7 +484,35 @@
           </div>
         </div>
 
-
+        <!-- Shortcuts & Pinning Section -->
+        <div class="pt-3 border-t border-slate-100 space-y-2">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span class="text-xs font-semibold text-slate-700">桌面与任务栏快捷方式</span>
+              <p class="text-[11px] text-slate-400 mt-0.5">为方便快速唤出传纸条，可将应用添加到桌面或固定到底部任务栏</p>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
+              <button
+                type="button"
+                @click="createDesktopShortcut"
+                :disabled="creatingShortcut"
+                class="px-3 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
+              >
+                <Monitor class="w-3.5 h-3.5 text-blue-600" />
+                <span>{{ creatingShortcut ? '正在创建...' : '添加到桌面快捷方式' }}</span>
+              </button>
+              <button
+                type="button"
+                @click="pinToTaskbar"
+                :disabled="pinningTaskbar"
+                class="px-3 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
+              >
+                <Pin class="w-3.5 h-3.5 text-blue-600" />
+                <span>{{ pinningTaskbar ? '正在固定...' : '固定到底部任务栏' }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
 
         <div class="pt-3 flex justify-end">
           <button
@@ -853,6 +891,8 @@ import {
   FolderOpen,
   FileText,
   Type,
+  Pin,
+  Monitor,
   Download
 } from 'lucide-vue-next';
 import QRCode from 'qrcode';
@@ -1495,4 +1535,41 @@ function copyLogsDir() {
 }
 
 const caInstalled = ref(false);
+
+const creatingShortcut = ref(false);
+
+async function createDesktopShortcut() {
+  creatingShortcut.value = true;
+  try {
+    const res = await fetch('/api/window/desktop-shortcut', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      alert(data.message || '已成功在电脑桌面创建【传纸条】快捷方式！');
+    } else {
+      alert(`创建桌面快捷方式失败：${data.error || '系统权限不足'}`);
+    }
+  } catch (err: any) {
+    alert(`创建桌面快捷方式失败：${err.message || '系统错误'}`);
+  } finally {
+    creatingShortcut.value = false;
+  }
+}
+
+const pinningTaskbar = ref(false);
+
+async function pinToTaskbar() {
+  pinningTaskbar.value = true;
+  try {
+    const res = await fetch('/api/window/pin-taskbar', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok && !data.message) {
+      throw new Error(`状态码 ${res.status}`);
+    }
+    alert(data.message || '已处理固定到底部任务栏请求。');
+  } catch (err: any) {
+    alert(`固定到任务栏提示：${err.message || '网络连接异常'}`);
+  } finally {
+    pinningTaskbar.value = false;
+  }
+}
 </script>

@@ -1306,15 +1306,23 @@ func (s *Server) handlePinTaskbar(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	var msg string
+	pinned := true
 	if s.desktop != nil {
-		go func() {
-			_ = s.desktop.PinToTaskbar()
-		}()
+		if err := s.desktop.PinToTaskbar(true); err != nil {
+			pinned = false
+			msg = err.Error()
+		} else {
+			msg = "已成功将 DeskNotify 传纸条固定到底部任务栏！"
+		}
+	} else {
+		msg = "非桌面环境，已跳过固定任务栏"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
-		"message": "已触发固定到底部任务栏",
+		"pinned":  pinned,
+		"message": msg,
 	})
 }
 
