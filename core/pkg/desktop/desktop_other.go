@@ -123,6 +123,20 @@ func (m *headlessManager) PinToTaskbar() error {
 	return nil
 }
 
+func (m *headlessManager) CreateDesktopShortcut() error {
+	logger.Infof("[DeskNotify] 创建桌面快捷方式: 非 Windows 系统环境跳过")
+	return nil
+}
+
+func (m *headlessManager) SetAutoStart(enabled bool) error {
+	logger.Infof("[DeskNotify] 设置开机自启: enabled=%v (非 Windows 系统环境跳过)", enabled)
+	return nil
+}
+
+func (m *headlessManager) IsAutoStartEnabled() bool {
+	return false
+}
+
 func (m *headlessManager) Quit() {
 	select {
 	case m.sigChan <- syscall.SIGTERM:

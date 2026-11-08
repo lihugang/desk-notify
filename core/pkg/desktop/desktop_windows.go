@@ -19,6 +19,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 	"github.com/wailsapp/wails/v3/pkg/w32"
+	"golang.org/x/sys/windows/registry"
 )
 
 type windowsManager struct {
@@ -41,6 +42,13 @@ func newManager() Manager {
 func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 	m.cfgMgr = cfgMgr
 	cfg := cfgMgr.Get()
+
+	// Sync Windows autostart on application run
+	if cfg.AutoStart {
+		if err := m.SetAutoStart(true); err != nil {
+			logger.Warnf("[DeskNotify] 同步开机自启失败: %v", err)
+		}
+	}
 
 	m.notifier = notifications.New()
 
@@ -145,6 +153,9 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 
 	if isFirstRun {
 		go func() {
+			if err := m.CreateDesktopShortcut(); err != nil {
+				logger.Warnf("[DeskNotify] 首次启动创建桌面快捷方式提示: %v", err)
+			}
 			if err := m.PinToTaskbar(); err != nil {
 				logger.Warnf("[DeskNotify] 首次启动固定到底部任务栏提示: %v", err)
 			}
@@ -201,6 +212,22 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 		m.OpenSettings()
 	})
 
+	menu.Add("添加到桌面快捷方式").OnClick(func(ctx *application.Context) {
+		go func() {
+			if err := m.CreateDesktopShortcut(); err != nil {
+				logger.Warnf("[DeskNotify] 创建桌面快捷方式提示: %v", err)
+			}
+		}()
+	})
+
+	menu.Add("固定到底部任务栏").OnClick(func(ctx *application.Context) {
+		go func() {
+			if err := m.PinToTaskbar(); err != nil {
+				logger.Warnf("[DeskNotify] 固定到底部任务栏提示: %v", err)
+			}
+		}()
+	})
+
 	menu.Add("打开通知存档目录").OnClick(func(ctx *application.Context) {
 		if err := m.OpenArchiveDir(); err != nil {
 			logger.Errorf("[DeskNotify] 打开通知存档目录失败: %v", err)
@@ -211,14 +238,6 @@ func (m *windowsManager) Run(cfgMgr *config.Manager) error {
 		if err := m.OpenLogsDir(); err != nil {
 			logger.Errorf("[DeskNotify] 打开运行日志目录失败: %v", err)
 		}
-	})
-
-	menu.Add("固定到底部任务栏").OnClick(func(ctx *application.Context) {
-		go func() {
-			if err := m.PinToTaskbar(); err != nil {
-				logger.Warnf("[DeskNotify] 固定到底部任务栏提示: %v", err)
-			}
-		}()
 	})
 
 	tray.SetMenu(menu)
@@ -253,7 +272,13 @@ func (m *windowsManager) Notify(n *db.Notification) {
 	// 2. Direct JS push into card window so it updates immediately without relying solely on WebSocket
 	if m.cardWindow != nil {
 		if data, err := json.Marshal(n); err == nil {
-			m.cardWindow.ExecJS(fmt.Sprintf("if (window.deskNotifyShowMessage) { window.deskNotifyShowMessage(%s); }", string(data)))
+			m.cardWindow.ExecJS(fmt.Sprintf(`
+				if (window.deskNotifyShowMessage) {
+					window.deskNotifyShowMessage(%s);
+				} else {
+					window.__deskNotifyPendingMessage = %s;
+				}
+			`, string(data), string(data)))
 		}
 	}
 
@@ -340,7 +365,13 @@ func (m *windowsManager) ShowCardPinned() {
 		if hwnd != 0 {
 			w32.SetForegroundWindow(hwnd)
 		}
-		m.cardWindow.ExecJS("if (window.deskNotifyShowLatest) { window.deskNotifyShowLatest(); }")
+		m.cardWindow.ExecJS(`
+			if (window.deskNotifyShowLatest) {
+				window.deskNotifyShowLatest();
+			} else {
+				window.__deskNotifyPendingShowLatest = true;
+			}
+		`)
 	}
 }
 
@@ -361,7 +392,13 @@ func (m *windowsManager) ShowCardBackground() {
 			}
 		}
 		m.cardWindow.Flash(true)
-		m.cardWindow.ExecJS("if (window.deskNotifyShowLatest) { window.deskNotifyShowLatest(); }")
+		m.cardWindow.ExecJS(`
+			if (window.deskNotifyShowLatest) {
+				window.deskNotifyShowLatest();
+			} else {
+				window.__deskNotifyPendingShowLatest = true;
+			}
+		`)
 	}
 }
 
@@ -380,7 +417,13 @@ func (m *windowsManager) ShowCard() {
 		if hwnd != 0 {
 			w32.SetForegroundWindow(hwnd)
 		}
-		m.cardWindow.ExecJS("if (window.deskNotifyShowLatest) { window.deskNotifyShowLatest(); }")
+		m.cardWindow.ExecJS(`
+			if (window.deskNotifyShowLatest) {
+				window.deskNotifyShowLatest();
+			} else {
+				window.__deskNotifyPendingShowLatest = true;
+			}
+		`)
 	}
 }
 
@@ -471,10 +514,127 @@ func (m *windowsManager) PinToTaskbar() error {
 	return PinSelfToTaskbar()
 }
 
+func (m *windowsManager) CreateDesktopShortcut() error {
+	return CreateShortcutOnDesktop()
+}
+
+func (m *windowsManager) SetAutoStart(enabled bool) error {
+	return SetWindowsAutoStart(enabled)
+}
+
+func (m *windowsManager) IsAutoStartEnabled() bool {
+	return IsWindowsAutoStartEnabled()
+}
+
 func (m *windowsManager) Quit() {
 	if m.app != nil {
 		m.app.Quit()
 	}
+}
+
+func SetWindowsAutoStart(enabled bool) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(exePath); err == nil && resolved != "" {
+		exePath = resolved
+	}
+	cleanExePath := filepath.Clean(exePath)
+
+	key, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.QUERY_VALUE|registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("failed to open Run registry key: %w", err)
+	}
+	defer key.Close()
+
+	if enabled {
+		val := fmt.Sprintf(`"%s"`, cleanExePath)
+		if err := key.SetStringValue("DeskNotify", val); err != nil {
+			return fmt.Errorf("failed to set Run registry value: %w", err)
+		}
+		logger.Infof("[DeskNotify] 已成功配置开机自启: %s", val)
+	} else {
+		_ = key.DeleteValue("DeskNotify")
+		logger.Infof("[DeskNotify] 已取消开机自启")
+	}
+	return nil
+}
+
+func IsWindowsAutoStartEnabled() bool {
+	key, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer key.Close()
+
+	val, _, err := key.GetStringValue("DeskNotify")
+	if err != nil || val == "" {
+		return false
+	}
+	return true
+}
+
+func CreateShortcutOnDesktop() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		logger.Errorf("[DeskNotify] 创建桌面快捷方式失败: 无法获取可执行文件路径: %v", err)
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(exePath); err == nil && resolved != "" {
+		exePath = resolved
+	}
+	cleanExePath := filepath.Clean(exePath)
+
+	logger.Infof("[DeskNotify] 正在创建桌面快捷方式: %s", cleanExePath)
+
+	psScript := fmt.Sprintf(`
+$target = '%s'
+$wsh = New-Object -ComObject WScript.Shell
+$desktopDir = [System.Environment]::GetFolderPath('Desktop')
+
+if (-not (Test-Path $desktopDir)) {
+    Write-Error "Desktop directory not found"
+    exit 1
+}
+
+$shortcutPath = Join-Path $desktopDir '传纸条.lnk'
+$shortcut = $wsh.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $target
+$shortcut.WorkingDirectory = Split-Path $target
+$shortcut.IconLocation = "$target,0"
+$shortcut.Description = "DeskNotify 传纸条 - 班级桌面通知"
+$shortcut.Save()
+
+# Also create in Start Menu Programs for convenience
+$appData = [System.Environment]::GetFolderPath('ApplicationData')
+$programsDir = Join-Path $appData 'Microsoft\Windows\Start Menu\Programs'
+if (Test-Path $programsDir) {
+    $menuLnk = Join-Path $programsDir 'DeskNotify.lnk'
+    $s2 = $wsh.CreateShortcut($menuLnk)
+    $s2.TargetPath = $target
+    $s2.WorkingDirectory = Split-Path $target
+    $s2.IconLocation = "$target,0"
+    $s2.Description = "DeskNotify 传纸条 - 班级桌面通知"
+    $s2.Save()
+}
+
+Write-Output "SUCCESS"
+`, cleanExePath)
+
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow: true,
+	}
+
+	out, err := cmd.CombinedOutput()
+	outputStr := string(out)
+	if err != nil {
+		logger.Warnf("[DeskNotify] 创建桌面快捷方式失败: %v (输出: %s)", err, outputStr)
+		return fmt.Errorf("创建桌面快捷方式失败: %v (%s)", err, outputStr)
+	}
+	logger.Infof("[DeskNotify] 创建桌面快捷方式成功: %s", outputStr)
+	return nil
 }
 
 func openFile(filePath string) error {
@@ -593,71 +753,68 @@ $appData = [System.Environment]::GetFolderPath('ApplicationData')
 $programsDir = Join-Path $appData 'Microsoft\Windows\Start Menu\Programs'
 $shortcutPath = Join-Path $programsDir 'DeskNotify.lnk'
 
-# 1. Ensure Start Menu Programs directory exists
+# 1. Ensure Start Menu Programs directory exists and create shortcut
 if (-not (Test-Path $programsDir)) {
     New-Item -ItemType Directory -Path $programsDir -Force | Out-Null
 }
 
 $wsh = New-Object -ComObject WScript.Shell
+try {
+    $s = $wsh.CreateShortcut($shortcutPath)
+    $s.TargetPath = $target
+    $s.WorkingDirectory = Split-Path $target
+    $s.IconLocation = "$target,0"
+    $s.Description = "DeskNotify 传纸条 - 班级桌面通知"
+    $s.Save()
+} catch {}
 
-# 2. Create Start Menu shortcut if not present
-if (-not (Test-Path $shortcutPath)) {
-    try {
-        $s = $wsh.CreateShortcut($shortcutPath)
-        $s.TargetPath = $target
-        $s.WorkingDirectory = Split-Path $target
-        $s.IconLocation = "$target,0"
-        $s.Description = "DeskNotify 班级桌面通知"
-        $s.Save()
-    } catch {}
-}
-
-# 3. Check if already pinned in User Pinned\TaskBar
-$taskbarDir = Join-Path $appData 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
-if (Test-Path $taskbarDir) {
-    $existing = Get-ChildItem -Path $taskbarDir -Filter "*.lnk" -ErrorAction SilentlyContinue | Where-Object {
-        try {
-            $lnk = $wsh.CreateShortcut($_.FullName)
-            $lnk.TargetPath -eq $target -or $_.Name -like "*DeskNotify*"
-        } catch { $false }
-    }
-    if ($existing) {
-        Write-Output "ALREADY_PINNED"
-        exit 0
-    }
-}
-
-# 4. Modern Windows (Windows 10 / 11) using CommandStore ExplorerCommandHandler
+# 2. Modern Windows (Windows 10 / 11) using CommandStore ExplorerCommandHandler via .NET Registry API
+# (Note: Using .NET Registry directly avoids PowerShell -Path wildcard expansion bug with '*')
 $pinned = $false
 $cmdKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell\Windows.taskbarpin"
 if (Test-Path $cmdKey) {
     try {
         $handler = (Get-ItemProperty $cmdKey).ExplorerCommandHandler
         if ($handler) {
-            $tempKey = "HKCU:\Software\Classes\*\shell\DeskNotifyPinTemp"
-            New-Item -Path $tempKey -Force | Out-Null
-            Set-ItemProperty -Path $tempKey -Name "ExplorerCommandHandler" -Value $handler
-            try {
-                $shell = New-Object -ComObject Shell.Application
-                foreach ($itemPath in @($shortcutPath, $target)) {
-                    if (Test-Path $itemPath) {
-                        $folder = $shell.Namespace((Split-Path $itemPath))
-                        $item = $folder.ParseName((Split-Path $itemPath -Leaf))
-                        if ($item) {
-                            $item.InvokeVerb("DeskNotifyPinTemp")
-                            $pinned = $true
-                            break
+            $regClasses = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\Classes", $true)
+            if ($regClasses) {
+                $starKey = $regClasses.CreateSubKey("*", $true)
+                $shellKey = $starKey.CreateSubKey("shell", $true)
+                $verbKey = $shellKey.CreateSubKey("{PIN}", $true)
+                $verbKey.SetValue("ExplorerCommandHandler", $handler)
+                $verbKey.Close()
+                $shellKey.Close()
+                $starKey.Close()
+                $regClasses.Close()
+
+                try {
+                    $shell = New-Object -ComObject Shell.Application
+                    foreach ($itemPath in @($shortcutPath, $target)) {
+                        if (Test-Path $itemPath) {
+                            $folder = $shell.Namespace((Split-Path $itemPath))
+                            $item = $folder.ParseName((Split-Path $itemPath -Leaf))
+                            if ($item) {
+                                $item.InvokeVerb("{PIN}")
+                                $pinned = $true
+                                break
+                            }
                         }
                     }
+                } finally {
+                    try {
+                        $regShell = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\Classes\*\shell", $true)
+                        if ($regShell) {
+                            $regShell.DeleteSubKeyTree("{PIN}", $false)
+                            $regShell.Close()
+                        }
+                    } catch {}
                 }
-            } finally {
-                Remove-Item -Path $tempKey -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
     } catch {}
 }
 
-# 5. Fallback for older Windows / localized shell verb
+# 3. Fallback for older Windows / localized shell verb
 if (-not $pinned) {
     try {
         $shell = New-Object -ComObject Shell.Application
@@ -667,7 +824,8 @@ if (-not $pinned) {
                 $item = $folder.ParseName((Split-Path $itemPath -Leaf))
                 if ($item) {
                     foreach ($verb in $item.Verbs()) {
-                        if ($verb.Name -match "taskbar|任务栏|锁定到任务栏") {
+                        $vname = $verb.Name -replace '&', ''
+                        if ($vname -match "taskbar|任务栏|锁定到任务栏|固定到任务栏|Pin to taskbar") {
                             $verb.DoIt()
                             $pinned = $true
                             break
@@ -677,6 +835,20 @@ if (-not $pinned) {
                 if ($pinned) { break }
             }
         }
+    } catch {}
+}
+
+# 4. Also place shortcut in User Pinned\TaskBar directory as fallback
+$taskbarDir = Join-Path $appData 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
+if (Test-Path $taskbarDir) {
+    try {
+        $tbLnk = Join-Path $taskbarDir 'DeskNotify.lnk'
+        $s3 = $wsh.CreateShortcut($tbLnk)
+        $s3.TargetPath = $target
+        $s3.WorkingDirectory = Split-Path $target
+        $s3.IconLocation = "$target,0"
+        $s3.Description = "DeskNotify 传纸条 - 班级桌面通知"
+        $s3.Save()
     } catch {}
 }
 

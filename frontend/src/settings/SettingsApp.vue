@@ -146,18 +146,39 @@
         </div>
 
         <!-- Root CA Certificate Info & Download -->
-        <div class="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3.5 flex items-center justify-between text-xs">
+        <div class="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div class="space-y-0.5">
-            <p class="font-semibold text-indigo-900">安装传纸条根证书 (HTTPS)</p>
-            <p class="text-[11px] text-indigo-600/80">手机/电脑导入证书可消除浏览器不安全警告，并支持 PWA 桌面独立快捷方式</p>
+            <div class="flex items-center gap-2">
+              <p class="font-semibold text-indigo-900">传纸条根证书 (HTTPS)</p>
+              <span
+                class="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                :class="caInstalled ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-amber-100 text-amber-700 border border-amber-200'"
+              >
+                {{ caInstalled ? '✓ 本机已受信任' : '未受信任' }}
+              </span>
+            </div>
+            <p class="text-[11px] text-indigo-600/80">信任证书后可消除浏览器不安全提示，支持 PWA 独立窗口，外接设备可下载后导入</p>
           </div>
-          <a
-            href="/DeskNotify-CA.cer"
-            download="DeskNotify-CA.cer"
-            class="px-3 py-1.5 bg-white hover:bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-700 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 flex-shrink-0"
-          >
-            <span>下载根证书 (.cer)</span>
-          </a>
+          <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            <button
+              type="button"
+              @click="trustRootCA"
+              :disabled="trustingCA"
+              class="px-3 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              :class="caInstalled ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-indigo-600 hover:bg-indigo-700 text-white'"
+            >
+              <ShieldCheck class="w-3.5 h-3.5" />
+              <span>{{ trustingCA ? '正在信任...' : (caInstalled ? '重新信任证书' : '一键信任证书') }}</span>
+            </button>
+            <a
+              href="/DeskNotify-CA.cer"
+              download="DeskNotify-CA.cer"
+              class="px-3 py-1.5 bg-white hover:bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-700 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5"
+            >
+              <Download class="w-3.5 h-3.5" />
+              <span>下载根证书 (.cer)</span>
+            </a>
+          </div>
         </div>
       </div>
 
@@ -473,22 +494,48 @@
           </div>
         </div>
 
-        <!-- Pin to Taskbar Section -->
+        <!-- Autostart on Boot Section -->
         <div class="pt-3 border-t border-slate-100 space-y-2">
           <div class="flex items-center justify-between">
             <div>
-              <span class="text-xs font-semibold text-slate-700">底部任务栏快捷方式</span>
-              <p class="text-[11px] text-slate-400 mt-0.5">将 DeskNotify 固定到 Windows 底部任务栏，方便随时唤出通知或重新启动</p>
+              <span class="text-xs font-semibold text-slate-700">开机自动启动</span>
+              <p class="text-[11px] text-slate-400 mt-0.5">电脑开机后 DeskNotify 自动在后台静默运行并常驻系统托盘，随时待命接收通知</p>
             </div>
-            <button
-              type="button"
-              @click="pinToTaskbar"
-              :disabled="pinningTaskbar"
-              class="px-3 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
-            >
-              <Pin class="w-3.5 h-3.5 text-blue-600" />
-              <span>{{ pinningTaskbar ? '正在固定...' : '固定到底部任务栏' }}</span>
-            </button>
+            <input
+              v-model="config.autoStart"
+              type="checkbox"
+              class="w-4 h-4 rounded text-blue-600 cursor-pointer"
+            />
+          </div>
+        </div>
+
+        <!-- Shortcuts & Pinning Section -->
+        <div class="pt-3 border-t border-slate-100 space-y-2">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span class="text-xs font-semibold text-slate-700">桌面与任务栏快捷方式</span>
+              <p class="text-[11px] text-slate-400 mt-0.5">为方便讲台老师与班干部快速唤出传纸条，可将应用添加到桌面或固定到任务栏</p>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
+              <button
+                type="button"
+                @click="createDesktopShortcut"
+                :disabled="creatingShortcut"
+                class="px-3 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
+              >
+                <Monitor class="w-3.5 h-3.5 text-blue-600" />
+                <span>{{ creatingShortcut ? '正在创建...' : '添加到桌面快捷方式' }}</span>
+              </button>
+              <button
+                type="button"
+                @click="pinToTaskbar"
+                :disabled="pinningTaskbar"
+                class="px-3 py-1.5 text-xs bg-white hover:bg-blue-50 text-blue-700 border border-slate-200 hover:border-blue-300 rounded-lg font-medium transition flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
+              >
+                <Pin class="w-3.5 h-3.5 text-blue-600" />
+                <span>{{ pinningTaskbar ? '正在固定...' : '固定到底部任务栏' }}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -598,12 +645,31 @@
             </div>
           </div>
 
-          <!-- Section 3: Expose Service to Public Network (Built-in FreeFRP) -->
+          <!-- Section 3: Expose Service to Public Network (Built-in FreeFRP / OpenFrp) -->
           <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div class="flex items-center justify-between">
               <div>
-                <span class="text-xs font-semibold text-slate-800">暴露服务到公网</span>
-                <p class="text-[11px] text-slate-400 mt-0.5">内置免费 FreeFRP 穿透服务，开启后校外教师可在任意网络扫码投递</p>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-semibold text-slate-800">暴露服务到公网 (FRP / OpenFrp)</span>
+                  <button
+                    v-if="config.frp.enabled"
+                    @click="showFrpImportModal = true"
+                    class="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded text-[11px] font-medium border border-blue-200/60 transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Download class="w-3 h-3" />
+                    导入配置 (TOML/INI)
+                  </button>
+                  <button
+                    v-if="config.frp.enabled"
+                    @click="resetToFreeFRP"
+                    class="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[11px] font-medium border border-slate-200/60 transition flex items-center gap-1 cursor-pointer"
+                    title="重置为默认 FreeFRP 公共节点配置"
+                  >
+                    <RotateCcw class="w-3 h-3" />
+                    恢复 FreeFRP 默认
+                  </button>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-0.5">支持内置 FreeFRP 或导入 OpenFrp 节点，开启后校外教师可在任意网络扫码投递</p>
               </div>
               <input v-model="config.frp.enabled" type="checkbox" class="w-4 h-4 rounded text-blue-600 cursor-pointer" />
             </div>
@@ -611,20 +677,20 @@
             <div v-if="config.frp.enabled" class="space-y-3 bg-white p-3.5 rounded-xl border border-slate-200/80 mt-2">
               <div class="grid grid-cols-3 gap-2">
                 <div class="col-span-2">
-                  <label class="block text-[11px] font-medium text-slate-500 mb-1">FreeFRP 服务器地址</label>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">FRP 服务器地址 (Server Addr)</label>
                   <input
                     v-model="config.frp.serverAddr"
                     type="text"
-                    placeholder="frp.freefrp.net"
+                    placeholder="如 cn-hk-bgp-4.ofalias.net 或 frp.freefrp.net"
                     class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
                   />
                 </div>
                 <div>
-                  <label class="block text-[11px] font-medium text-slate-500 mb-1">服务器端口</label>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">服务器端口 (Port)</label>
                   <input
                     v-model.number="config.frp.serverPort"
                     type="number"
-                    placeholder="7000"
+                    placeholder="7000 或 8120"
                     class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
                   />
                 </div>
@@ -632,28 +698,81 @@
 
               <div class="grid grid-cols-2 gap-2">
                 <div>
-                  <label class="block text-[11px] font-medium text-slate-500 mb-1">通信密钥 (Token)</label>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">用户标识 User (OpenFrp 专属，普通 FRP 留空)</label>
                   <input
-                    v-model="config.frp.token"
-                    type="password"
-                    placeholder="freefrp.net"
-                    class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                    v-model="config.frp.user"
+                    type="text"
+                    placeholder="OpenFrp 用户标识 (user)"
+                    class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white font-mono"
                   />
                 </div>
                 <div>
-                  <label class="block text-[11px] font-medium text-slate-500 mb-1">远程绑定端口 (首次启动随机固定)</label>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">通信密钥 Token</label>
+                  <input
+                    v-model="config.frp.token"
+                    type="password"
+                    placeholder="认证 Token"
+                    class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                  />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">隧道名称 (Proxy Name)</label>
+                  <input
+                    v-model="config.frp.proxyName"
+                    type="text"
+                    placeholder="如 test (留空自动生成)"
+                    class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-medium text-slate-500 mb-1">远程绑定端口 (Remote Port)</label>
                   <input
                     v-model.number="config.frp.remotePort"
                     type="number"
-                    placeholder="如 28932"
+                    placeholder="如 50847"
                     class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white font-mono"
                   />
                 </div>
               </div>
 
-              <div class="text-[11px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200/60">
-                <span>外网访问地址：</span>
-                <span class="font-mono text-blue-600 font-semibold">http://{{ config.frp.serverAddr || 'frp.freefrp.net' }}:{{ config.frp.remotePort }}</span>
+              <!-- TLS Options -->
+              <div class="p-2.5 bg-slate-50/80 rounded-lg border border-slate-200/60 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <span class="text-[11px] font-medium text-slate-700">传输加密 TLS (transport.tls.enable)</span>
+                    <p class="text-[10px] text-slate-400">OpenFrp 节点建议勾选；内置 FreeFRP 通常保持关闭</p>
+                  </div>
+                  <input
+                    v-model="config.frp.tlsEnable"
+                    type="checkbox"
+                    class="w-3.5 h-3.5 rounded text-blue-600 cursor-pointer"
+                  />
+                </div>
+
+                <div v-if="config.frp.tlsEnable" class="flex items-center justify-between pt-1 border-t border-slate-200/40">
+                  <div>
+                    <span class="text-[11px] font-medium text-slate-700">禁用自定义首字节 (disableCustomTLSFirstByte)</span>
+                    <p class="text-[10px] text-slate-400">OpenFrp 节点建议关闭 (false)；标准原版节点若连不上可尝试开启 (true)</p>
+                  </div>
+                  <input
+                    v-model="config.frp.disableCustomTLSFirstByte"
+                    type="checkbox"
+                    class="w-3.5 h-3.5 rounded text-blue-600 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div class="text-[11px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200/60 flex items-center justify-between">
+                <div>
+                  <span>外网访问地址：</span>
+                  <span class="font-mono text-blue-600 font-semibold">{{ frpPublicUrl || ('http://' + (config.frp.serverAddr || 'frp.freefrp.net') + ':' + config.frp.remotePort) }}</span>
+                </div>
+                <span v-if="frpStatus" :class="frpStatus === 'connected' ? 'text-emerald-600 font-medium' : 'text-slate-400'">
+                  {{ frpStatus === 'connected' ? '● 已连接' : frpStatus === 'connecting' ? '◌ 连接中...' : '○ 未连接' }}
+                </span>
               </div>
             </div>
           </div>
@@ -710,6 +829,69 @@
         </div>
       </div>
     </div>
+
+    <!-- FRP Import Modal -->
+    <div
+      v-if="showFrpImportModal"
+      class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in"
+      @click.self="showFrpImportModal = false"
+    >
+      <div class="bg-white rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div class="flex items-center gap-2">
+            <Download class="w-4 h-4 text-blue-600" />
+            <h3 class="text-sm font-bold text-slate-800">一键导入 FRP / OpenFrp 配置</h3>
+          </div>
+          <button @click="showFrpImportModal = false" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer">
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+
+        <p class="text-xs text-slate-500 leading-relaxed">
+          直接将从 OpenFrp 或其他平台复制的配置文件文本（支持 <code>frpc.toml</code> 或旧版 <code>frpc.ini</code>）粘贴在下方，系统将自动识别并回填各项参数：
+        </p>
+
+        <textarea
+          v-model="frpImportText"
+          rows="10"
+          placeholder="例如：
+serverAddr = 'cn-hk-bgp-4.ofalias.net'
+serverPort = 8120
+user = 'f58dbf7c...'
+
+[auth]
+token = '...'
+
+[[proxies]]
+name = 'test'
+remotePort = 50847
+
+[transport.tls]
+disableCustomTLSFirstByte = false
+enable = true"
+          class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:bg-white resize-none"
+        ></textarea>
+
+        <div v-if="frpImportError" class="text-xs text-rose-500 bg-rose-50 p-2.5 rounded-lg border border-rose-100">
+          {{ frpImportError }}
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button
+            @click="showFrpImportModal = false"
+            class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+          >
+            取消
+          </button>
+          <button
+            @click="applyFrpImport"
+            class="px-5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition cursor-pointer"
+          >
+            解析并填入
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -734,10 +916,13 @@ import {
   FolderOpen,
   FileText,
   Type,
-  Pin
+  Pin,
+  Monitor,
+  Download
 } from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import type { AppConfig } from '../types';
+import { parseFRPConfigText } from '../utils/frpParser';
 
 interface AddressItem {
   id: string;
@@ -751,6 +936,56 @@ interface AddressItem {
 const activeTab = ref<'qrcode' | 'basic' | 'security'>('qrcode');
 const lanIPs = ref<string[]>(['127.0.0.1']);
 const frpPublicUrl = ref('');
+const frpStatus = ref('');
+const showFrpImportModal = ref(false);
+const frpImportText = ref('');
+const frpImportError = ref('');
+
+function applyFrpImport() {
+  frpImportError.value = '';
+  if (!frpImportText.value.trim()) {
+    frpImportError.value = '请粘贴配置文件内容 (支持 TOML / INI 格式)';
+    return;
+  }
+  const parsed = parseFRPConfigText(frpImportText.value);
+  if (!parsed.serverAddr && !parsed.token && !parsed.user && !parsed.remotePort) {
+    frpImportError.value = '未能解析到有效的 FRP 配置项，请确认内容格式';
+    return;
+  }
+
+  if (parsed.serverAddr) config.value.frp.serverAddr = parsed.serverAddr;
+  if (parsed.serverPort) config.value.frp.serverPort = parsed.serverPort;
+  if (parsed.user !== undefined) config.value.frp.user = parsed.user;
+  if (parsed.token) config.value.frp.token = parsed.token;
+  if (parsed.remotePort) config.value.frp.remotePort = parsed.remotePort;
+  if (parsed.proxyName !== undefined) config.value.frp.proxyName = parsed.proxyName;
+  if (parsed.protocol) config.value.frp.protocol = parsed.protocol;
+  if (parsed.tlsEnable !== undefined) config.value.frp.tlsEnable = parsed.tlsEnable;
+  if (parsed.disableCustomTLSFirstByte !== undefined) {
+    config.value.frp.disableCustomTLSFirstByte = parsed.disableCustomTLSFirstByte;
+  }
+  config.value.frp.enabled = true;
+
+  showFrpImportModal.value = false;
+  frpImportText.value = '';
+  frpImportError.value = '';
+  alert('配置导入并解析成功！已自动填充表单各项参数，请点击“保存安全与公网配置”以生效。');
+}
+
+function resetToFreeFRP() {
+  config.value.frp.serverAddr = 'frp.freefrp.net';
+  config.value.frp.serverPort = 7000;
+  config.value.frp.token = 'freefrp.net';
+  config.value.frp.user = '';
+  config.value.frp.proxyName = '';
+  config.value.frp.protocol = 'tcp';
+  config.value.frp.tlsEnable = false;
+  config.value.frp.disableCustomTLSFirstByte = false;
+  if (!config.value.frp.remotePort) {
+    config.value.frp.remotePort = 10001 + Math.floor(Math.random() * 39999);
+  }
+  alert('已重置为默认 FreeFRP 节点配置，请点击“保存安全与公网配置”以应用。');
+}
 const saving = ref(false);
 const isFirstRun = ref(false);
 
@@ -806,7 +1041,12 @@ const config = ref<AppConfig>({
     serverAddr: 'frp.freefrp.net',
     serverPort: 7000,
     token: 'freefrp.net',
-    remotePort: 28932
+    remotePort: 28932,
+    user: '',
+    proxyName: '',
+    protocol: 'tcp',
+    tlsEnable: false,
+    disableCustomTLSFirstByte: false
   }
 });
 
@@ -962,6 +1202,12 @@ async function fetchStatusAndConfig() {
       }
       lanIPs.value = data.lanIPs || ['127.0.0.1'];
       frpPublicUrl.value = data.frpPublicUrl || '';
+      if (data.frpStatus) {
+        frpStatus.value = data.frpStatus;
+      }
+      if (typeof data.caInstalled === 'boolean') {
+        caInstalled.value = data.caInstalled;
+      }
       initSoundMode();
     }
   } catch (e) {
@@ -1303,6 +1549,50 @@ function copyLogsDir() {
   });
 }
 
+const caInstalled = ref(false);
+const trustingCA = ref(false);
+
+async function trustRootCA() {
+  trustingCA.value = true;
+  try {
+    const res = await fetch('/api/cert/trust', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.installed) {
+      caInstalled.value = true;
+      alert('已成功安装并信任传纸条作者统一根证书！\n局域网 HTTPS 和 Windows 系统现已完全信任本程序。');
+    } else {
+      const err = data.error || (data.message ? data.message : '提权请求被取消或失败');
+      alert(`证书信任安装提示：${err}`);
+      if (data.installed) {
+        caInstalled.value = true;
+      }
+    }
+  } catch (err: any) {
+    alert(`信任证书请求异常：${err.message || '网络连接失败'}`);
+  } finally {
+    trustingCA.value = false;
+  }
+}
+
+const creatingShortcut = ref(false);
+
+async function createDesktopShortcut() {
+  creatingShortcut.value = true;
+  try {
+    const res = await fetch('/api/window/desktop-shortcut', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      alert('已成功在电脑桌面创建【传纸条】快捷方式！');
+    } else {
+      alert(`创建桌面快捷方式失败：${data.error || '系统权限不足'}`);
+    }
+  } catch (err: any) {
+    alert(`创建桌面快捷方式失败：${err.message || '系统错误'}`);
+  } finally {
+    creatingShortcut.value = false;
+  }
+}
+
 const pinningTaskbar = ref(false);
 
 async function pinToTaskbar() {
@@ -1312,7 +1602,8 @@ async function pinToTaskbar() {
     if (!res.ok) {
       throw new Error(`状态码 ${res.status}`);
     }
-    alert('已成功触发将 DeskNotify 固定到底部任务栏');
+    const data = await res.json().catch(() => ({}));
+    alert(data.message || '已触发将 DeskNotify 固定到底部任务栏。\n如果系统未自动显示在任务栏，您也可以在桌面图标上右键选择【固定到任务栏】。');
   } catch (err: any) {
     alert(`固定到任务栏请求失败：${err.message || '系统错误'}`);
   } finally {

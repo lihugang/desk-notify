@@ -14,12 +14,17 @@ import (
 )
 
 type FRPConfig struct {
-	Enabled    bool   `json:"enabled"`
-	ServerAddr string `json:"serverAddr"`
-	ServerPort int    `json:"serverPort"`
-	Token      string `json:"token"`
-	RemotePort int    `json:"remotePort"`
-	Subdomain  string `json:"subdomain,omitempty"`
+	Enabled                   bool   `json:"enabled"`
+	ServerAddr                string `json:"serverAddr"`
+	ServerPort                int    `json:"serverPort"`
+	Token                     string `json:"token"`
+	RemotePort                int    `json:"remotePort"`
+	Subdomain                 string `json:"subdomain,omitempty"`
+	User                      string `json:"user,omitempty"`
+	ProxyName                 string `json:"proxyName,omitempty"`
+	Protocol                  string `json:"protocol,omitempty"`
+	TLSEnable                 *bool  `json:"tlsEnable,omitempty"`
+	DisableCustomTLSFirstByte *bool  `json:"disableCustomTLSFirstByte,omitempty"`
 }
 
 type AppConfig struct {

@@ -46,6 +46,11 @@ export interface AppConfig {
     token: string;
     remotePort: number;
     subdomain?: string;
+    user?: string;
+    proxyName?: string;
+    protocol?: string;
+    tlsEnable?: boolean;
+    disableCustomTLSFirstByte?: boolean;
   };
 }
 

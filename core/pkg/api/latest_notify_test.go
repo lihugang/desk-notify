@@ -323,3 +323,99 @@ func TestPinTaskbarEndpoint(t *testing.T) {
 		t.Fatalf("expected ok=true, got %+v", resp)
 	}
 }
+
+func TestDesktopShortcutEndpoint(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "desknotify-shortcut-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	os.Setenv("APPDATA", tempDir)
+	defer os.Unsetenv("APPDATA")
+
+	cfgMgr, err := config.NewManager()
+	if err != nil {
+		t.Fatalf("failed to create config manager: %v", err)
+	}
+
+	store, err := db.NewStore(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	srv := NewServer(cfgMgr, store, storage.NewStorage(tempDir), tunnel.NewMockTunnel(), desktop.NewManager(), nil)
+
+	// GET method should be rejected
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/window/desktop-shortcut", nil)
+	recGet := httptest.NewRecorder()
+	srv.handleDesktopShortcut(recGet, reqGet)
+	if recGet.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 Method Not Allowed for GET, got %d", recGet.Code)
+	}
+
+	// POST method should succeed
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/window/desktop-shortcut", nil)
+	recPost := httptest.NewRecorder()
+	srv.handleDesktopShortcut(recPost, reqPost)
+	if recPost.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for POST, got %d", recPost.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(recPost.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+	if resp["ok"] != true {
+		t.Fatalf("expected ok=true, got %+v", resp)
+	}
+}
+
+func TestCertStatusAndTrustEndpoints(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "desknotify-cert-api-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	os.Setenv("APPDATA", tempDir)
+	defer os.Unsetenv("APPDATA")
+
+	cfgMgr, err := config.NewManager()
+	if err != nil {
+		t.Fatalf("failed to create config manager: %v", err)
+	}
+
+	store, err := db.NewStore(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	srv := NewServer(cfgMgr, store, storage.NewStorage(tempDir), tunnel.NewMockTunnel(), desktop.NewManager(), nil)
+
+	// GET /api/cert/status
+	reqStatus := httptest.NewRequest(http.MethodGet, "/api/cert/status", nil)
+	recStatus := httptest.NewRecorder()
+	srv.handleCertStatus(recStatus, reqStatus)
+	if recStatus.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET status, got %d", recStatus.Code)
+	}
+
+	var statusResp map[string]interface{}
+	if err := json.Unmarshal(recStatus.Body.Bytes(), &statusResp); err != nil {
+		t.Fatalf("failed to parse cert status json: %v", err)
+	}
+	if _, ok := statusResp["installed"]; !ok {
+		t.Fatalf("expected installed field in response, got %+v", statusResp)
+	}
+
+	// POST /api/cert/trust
+	reqTrust := httptest.NewRequest(http.MethodPost, "/api/cert/trust", nil)
+	recTrust := httptest.NewRecorder()
+	srv.handleCertTrust(recTrust, reqTrust)
+	if recTrust.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for POST trust on mock/linux, got %d", recTrust.Code)
+	}
+}

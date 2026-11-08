@@ -1,6 +1,5 @@
 <template>
   <div
-    v-if="isCardVisible && (notifications.length > 0 || viewMode === 'history')"
     class="fixed inset-0 p-3 sm:p-5 flex flex-col justify-start items-center bg-transparent pointer-events-auto cursor-default"
     @click.self="handleBackdropClick"
   >
@@ -27,18 +26,25 @@
       >
         <div class="flex items-center space-x-2.5 pointer-events-none">
           <span
-            v-if="viewMode === 'current'"
+            v-if="viewMode === 'current' && notifications.length > 0"
             class="px-2.5 py-1 rounded-full text-xs font-bold tracking-wide shadow-xs flex items-center gap-1"
-            :class="notifications.length > 0 && notifications[0].pinned ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white'"
+            :class="notifications[0].pinned ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white'"
           >
             <Bell class="w-3 h-3" />
             <span>最新通知</span>
           </span>
           <span
-            v-else
+            v-else-if="viewMode === 'history'"
             class="px-2.5 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-xs bg-indigo-600 text-white"
           >
             历史记录
+          </span>
+          <span
+            v-else
+            class="px-2.5 py-1 rounded-full text-xs font-bold tracking-wide shadow-xs flex items-center gap-1 bg-blue-600 text-white"
+          >
+            <Bell class="w-3 h-3" />
+            <span>最新通知</span>
           </span>
           <span class="text-xs text-slate-500 font-medium">{{ classroomName }} · 桌面通知</span>
         </div>
@@ -192,88 +198,8 @@
         </div>
       </div>
 
-      <!-- Bottom Resize Border (Vertical drag resize only) -->
-      <div
-        class="absolute bottom-0 left-0 right-0 h-2.5 cursor-ns-resize z-50 select-none hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors"
-        title="上下拖动调整窗口高度"
-        data-no-drag
-        style="-webkit-app-region: no-drag;"
-        @mousedown.stop="handleResizeBottom"
-      ></div>
-    </div>
-
-    <!-- Image Lightbox Modal -->
-    <ImageLightbox :image-url="activeLightboxImage" @close="activeLightboxImage = null" />
-  </div>
-
-  <!-- Empty State Card (When no notification exists) -->
-  <div
-    v-else-if="isCardVisible && showEmptyState"
-    class="fixed inset-0 p-3 sm:p-5 flex flex-col justify-start items-center bg-transparent pointer-events-auto cursor-default"
-    @click.self="handleBackdropClick"
-  >
-    <div
-      class="relative w-full max-w-md bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden transform animate-slide-in text-slate-800 flex flex-col h-full transition-[box-shadow,background-color] duration-300"
-    >
-      <!-- Top Resize Border -->
-      <div
-        class="absolute top-0 left-0 right-0 h-2 cursor-ns-resize z-50 select-none hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors"
-        title="上下拖动调整窗口高度"
-        data-no-drag
-        style="-webkit-app-region: no-drag;"
-        @mousedown.stop="handleResizeTop"
-      ></div>
-
-      <!-- Top Bar -->
-      <div
-        class="px-6 py-3.5 flex items-center justify-between border-b border-slate-100 select-none bg-slate-50 cursor-move flex-shrink-0 drag-header"
-        style="-webkit-app-region: drag; --wails-draggable: drag;"
-        @mousedown="handleHeaderMouseDown"
-      >
-        <div class="flex items-center space-x-2 pointer-events-none">
-          <Bell class="w-4 h-4 text-blue-600" />
-          <span class="text-xs text-slate-500 font-medium">{{ classroomName }} · 桌面通知</span>
-        </div>
-
-        <div class="flex items-center space-x-2" style="-webkit-app-region: no-drag;" data-no-drag>
-          <!-- History Mode Toggle Button -->
-          <button
-            @click="switchToHistory"
-            class="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 transition flex items-center gap-1 cursor-pointer shadow-2xs"
-            title="查看历史通知记录"
-            data-no-drag
-            style="-webkit-app-region: no-drag;"
-          >
-            <History class="w-3.5 h-3.5" />
-            <span>历史通知</span>
-          </button>
-
-          <!-- Minimize Button -->
-          <button
-            @click="minimizeCard"
-            class="p-1.5 rounded-full hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 transition cursor-pointer"
-            title="最小化"
-            data-no-drag
-            style="-webkit-app-region: no-drag;"
-          >
-            <Minus class="w-4 h-4" />
-          </button>
-
-          <!-- Manual Close Button -->
-          <button
-            @click="closeCard"
-            class="p-1.5 rounded-full hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 transition cursor-pointer"
-            title="关闭窗口"
-            data-no-drag
-            style="-webkit-app-region: no-drag;"
-          >
-            <X class="w-5 h-5" />
-          </button>
-        </div>
-      </div>
-
-      <!-- Empty State Content -->
-      <div class="p-8 text-center space-y-4">
+      <!-- Body: Empty State View (When no notification exists) -->
+      <div v-else class="p-8 flex-1 flex flex-col items-center justify-center text-center space-y-4">
         <div class="w-16 h-16 mx-auto rounded-2xl bg-slate-100/80 flex items-center justify-center text-slate-400">
           <Inbox class="w-8 h-8" />
         </div>
@@ -291,7 +217,7 @@
         </div>
       </div>
 
-      <!-- Bottom Resize Border -->
+      <!-- Bottom Resize Border (Vertical drag resize only) -->
       <div
         class="absolute bottom-0 left-0 right-0 h-2.5 cursor-ns-resize z-50 select-none hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors"
         title="上下拖动调整窗口高度"
@@ -300,6 +226,9 @@
         @mousedown.stop="handleResizeBottom"
       ></div>
     </div>
+
+    <!-- Image Lightbox Modal -->
+    <ImageLightbox :image-url="activeLightboxImage" @close="activeLightboxImage = null" />
   </div>
 </template>
 
@@ -316,8 +245,6 @@ const notifications = ref<NotificationMessage[]>([]);
 const classroomName = ref('班级大屏');
 const remainingSeconds = ref(0);
 const viewMode = ref<'current' | 'history'>('current');
-const showEmptyState = ref(false);
-const isCardVisible = ref(false);
 const activeLightboxImage = ref<string | null>(null);
 const currentFontSize = ref(
   (typeof localStorage !== 'undefined' && localStorage.getItem('desknotify_font_size')) || '16px'
@@ -329,6 +256,8 @@ const DEFAULT_CURRENT_HEIGHT = 420; // 默认最新通知大小：顶部拖动�
 const DEFAULT_HISTORY_HEIGHT = 760; // 默认历史通知大小：大屏长列表
 let lastAppliedHeight = 0;
 let resizeDebounceTimer: any = null;
+let activeFetchId = 0;
+let isFetchingLatest = false;
 
 function getSavedHeightForMode(mode: 'current' | 'history'): number {
   try {
@@ -360,7 +289,6 @@ async function syncWindowHeight(mode: 'current' | 'history') {
 }
 
 function handleWindowResize() {
-  if (!isCardVisible.value) return;
   if (resizeDebounceTimer) {
     clearTimeout(resizeDebounceTimer);
   }
@@ -379,14 +307,22 @@ function handleWindowResize() {
   }, 200);
 }
 
-function switchToHistory() {
-  viewMode.value = 'history';
-  showEmptyState.value = false;
-  isCardVisible.value = true;
-  syncWindowHeight('history');
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
+function toggleViewMode() {
+  if (viewMode.value === 'current') {
+    viewMode.value = 'history';
+    syncWindowHeight('history');
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  } else {
+    viewMode.value = 'current';
+    syncWindowHeight('current');
+    if (notifications.value.length === 0) {
+      fetchLatestNotification(false);
+    } else if (notifications.value[0]?.duration > 0 && remainingSeconds.value > 0) {
+      startCountdown();
+    }
   }
 }
 
@@ -417,8 +353,6 @@ function pruneExpiredNotifications() {
 
 function handleIncomingNotification(msg: any) {
   viewMode.value = 'current';
-  showEmptyState.value = false;
-  isCardVisible.value = true;
   syncWindowHeight('current');
 
   // 1. If msg contains full 90-minute notifications list from backend WebSocket
@@ -487,6 +421,75 @@ function handleResizeBottom(e: MouseEvent) {
   }
 }
 
+async function fetchLatestNotification(playSound: boolean = false) {
+  const fetchId = ++activeFetchId;
+  isFetchingLatest = true;
+  try {
+    const res = await fetch(`/api/notify/latest?t=${Date.now()}`);
+    if (fetchId !== activeFetchId) return;
+    if (res.ok) {
+      const data = await res.json();
+      if (data.className) {
+        classroomName.value = data.className;
+      }
+      if (data.fontSize) {
+        currentFontSize.value = data.fontSize;
+        try {
+          localStorage.setItem('desknotify_font_size', data.fontSize);
+        } catch {}
+      }
+      const rawList: NotificationMessage[] =
+        data.notifications && data.notifications.length > 0
+          ? data.notifications
+          : data.notification
+            ? [data.notification]
+            : [];
+
+      if (data.hasNotification && rawList.length > 0) {
+        notifications.value = rawList.map((item) => ({
+          ...item,
+          soundEnabled: data.soundEnabled,
+          soundUrl: data.soundUrl,
+        }));
+        pruneExpiredNotifications();
+        if (notifications.value.length > 0) {
+          if (playSound && notifications.value[0]?.soundEnabled !== false) {
+            playAlertSound(notifications.value[0]?.soundUrl);
+          }
+          if (notifications.value[0]?.duration > 0 && remainingSeconds.value <= 0) {
+            remainingSeconds.value = notifications.value[0].duration;
+            startCountdown();
+          }
+        }
+      } else {
+        notifications.value = [];
+      }
+    } else {
+      console.warn('获取最新通知返回状态码非200:', res.status);
+    }
+  } catch (e) {
+    console.error('获取最新通知失败', e);
+  } finally {
+    if (fetchId === activeFetchId) {
+      isFetchingLatest = false;
+    }
+  }
+}
+
+const deskNotifyShowLatestHandler = async () => {
+  viewMode.value = 'current';
+  syncWindowHeight('current');
+  await fetchLatestNotification(false);
+};
+
+const deskNotifyShowMessageHandler = (msg: NotificationMessage) => {
+  handleIncomingNotification(msg);
+};
+
+// Expose handlers to Wails / window runtime
+(window as any).deskNotifyShowLatest = deskNotifyShowLatestHandler;
+(window as any).deskNotifyShowMessage = deskNotifyShowMessageHandler;
+
 onMounted(() => {
   if (typeof BroadcastChannel !== 'undefined') {
     const fontChannel = new BroadcastChannel('desknotify_font_channel');
@@ -503,20 +506,23 @@ onMounted(() => {
   });
 
   connectWebSocket();
-  fetchLatestNotification(false).then(() => {
-    if (notifications.value.length > 0) {
-      isCardVisible.value = true;
-    }
-  });
+
+  // Process any pending commands queued before Vue mounted
+  if ((window as any).__deskNotifyPendingMessage) {
+    const pendingMsg = (window as any).__deskNotifyPendingMessage;
+    (window as any).__deskNotifyPendingMessage = null;
+    deskNotifyShowMessageHandler(pendingMsg);
+  } else if ((window as any).__deskNotifyPendingShowLatest) {
+    (window as any).__deskNotifyPendingShowLatest = false;
+    deskNotifyShowLatestHandler();
+  } else {
+    fetchLatestNotification(false);
+  }
 
   window.addEventListener('focus', () => {
     handleWindowInteraction();
-    if (notifications.value.length === 0 && viewMode.value === 'current') {
-      fetchLatestNotification(false).then(() => {
-        if (notifications.value.length > 0) {
-          isCardVisible.value = true;
-        }
-      });
+    if (viewMode.value === 'current' && !isFetchingLatest) {
+      fetchLatestNotification(false);
     }
   });
 
@@ -532,88 +538,6 @@ onUnmounted(() => {
     clearTimeout(resizeDebounceTimer);
   }
 });
-
-function toggleViewMode() {
-  if (viewMode.value === 'current') {
-    viewMode.value = 'history';
-    showEmptyState.value = false;
-    isCardVisible.value = true;
-    syncWindowHeight('history');
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-  } else {
-    viewMode.value = 'current';
-    isCardVisible.value = true;
-    syncWindowHeight('current');
-    if (notifications.value.length === 0) {
-      fetchLatestNotification(false);
-    } else if (notifications.value[0]?.duration > 0 && remainingSeconds.value > 0) {
-      startCountdown();
-    }
-  }
-}
-
-async function fetchLatestNotification(playSound: boolean = false) {
-  try {
-    const res = await fetch(`/api/notify/latest?t=${Date.now()}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.className) {
-        classroomName.value = data.className;
-      }
-      if (data.fontSize) {
-        currentFontSize.value = data.fontSize;
-        try {
-          localStorage.setItem('desknotify_font_size', data.fontSize);
-        } catch {}
-      }
-      const rawList: NotificationMessage[] = data.notifications && data.notifications.length > 0
-        ? data.notifications
-        : (data.notification ? [data.notification] : []);
-
-      if (data.hasNotification && rawList.length > 0) {
-        showEmptyState.value = false;
-        notifications.value = rawList.map((item) => ({
-          ...item,
-          soundEnabled: data.soundEnabled,
-          soundUrl: data.soundUrl,
-        }));
-        pruneExpiredNotifications();
-        if (playSound && notifications.value[0]?.soundEnabled !== false) {
-          playAlertSound(notifications.value[0]?.soundUrl);
-        }
-        if (notifications.value[0]?.duration > 0 && remainingSeconds.value <= 0) {
-          remainingSeconds.value = notifications.value[0].duration;
-          startCountdown();
-        }
-      } else {
-        notifications.value = [];
-        if (viewMode.value !== 'history' && isCardVisible.value) {
-          showEmptyState.value = true;
-        }
-      }
-    }
-  } catch (e) {
-    console.error('获取最新通知失败', e);
-  }
-}
-
-// Expose handlers to Wails / window runtime
-(window as any).deskNotifyShowLatest = async () => {
-  viewMode.value = 'current';
-  isCardVisible.value = true;
-  syncWindowHeight('current');
-  await fetchLatestNotification(false);
-  if (notifications.value.length === 0) {
-    showEmptyState.value = true;
-  }
-};
-
-(window as any).deskNotifyShowMessage = (msg: NotificationMessage) => {
-  handleIncomingNotification(msg);
-};
 
 function connectWebSocket() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -675,8 +599,6 @@ function closeCard() {
     clearInterval(timer);
     timer = null;
   }
-  isCardVisible.value = false;
-  showEmptyState.value = false;
   viewMode.value = 'current';
   lastAppliedHeight = 0;
   if ((window as any).runtime?.WindowHide) {

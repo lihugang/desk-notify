@@ -3,6 +3,7 @@ package frptunnel
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,17 +64,40 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 		clientCfg.ServerAddr = cfg.ServerAddr
 		clientCfg.ServerPort = cfg.ServerPort
 		clientCfg.Auth.Token = cfg.Token
+		if cfg.User != "" {
+			clientCfg.User = cfg.User
+		}
+		if cfg.Protocol != "" {
+			clientCfg.Transport.Protocol = cfg.Protocol
+		}
+		if cfg.TLSEnable != nil {
+			clientCfg.Transport.TLS.Enable = cfg.TLSEnable
+		}
+		if cfg.DisableCustomTLSFirstByte != nil {
+			clientCfg.Transport.TLS.DisableCustomTLSFirstByte = cfg.DisableCustomTLSFirstByte
+		}
+
 		loginFailExit := false
 		clientCfg.LoginFailExit = &loginFailExit
 		clientCfg.Complete()
 
+		proxyName := cfg.ProxyName
+		if proxyName == "" {
+			proxyName = fmt.Sprintf("desk-notify-%d", cfg.RemotePort)
+		}
+
 		proxyCfg := &v1.TCPProxyConfig{}
-		proxyCfg.Name = fmt.Sprintf("desk-notify-%d", cfg.RemotePort)
+		proxyCfg.Name = proxyName
 		proxyCfg.Type = "tcp"
 		proxyCfg.LocalIP = "127.0.0.1"
 		proxyCfg.LocalPort = cfg.LocalPort
 		proxyCfg.RemotePort = cfg.RemotePort
-		proxyCfg.Complete("")
+
+		prefix := clientCfg.User
+		if prefix != "" && strings.HasPrefix(proxyName, prefix+".") {
+			prefix = ""
+		}
+		proxyCfg.Complete(prefix)
 
 		svr, err := client.NewService(client.ServiceOptions{
 			Common: &clientCfg,
@@ -93,8 +117,13 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 		f.svr = svr
 		f.status = "connected"
 		f.mu.Unlock()
-		logger.Infof("[DeskNotify FRP] 穿透服务启动中: 远程端口 %d -> 本地端口 %d (服务器: %s:%d)",
-			cfg.RemotePort, cfg.LocalPort, cfg.ServerAddr, cfg.ServerPort)
+
+		tlsStatus := "关闭"
+		if clientCfg.Transport.TLS.Enable != nil && *clientCfg.Transport.TLS.Enable {
+			tlsStatus = "开启"
+		}
+		logger.Infof("[DeskNotify FRP] 穿透服务启动中: 隧道 [%s] 远程端口 %d -> 本地端口 %d (服务器: %s:%d, TLS: %s)",
+			proxyCfg.Name, cfg.RemotePort, cfg.LocalPort, cfg.ServerAddr, cfg.ServerPort, tlsStatus)
 
 		if err := svr.Run(ctx); err != nil {
 			f.mu.Lock()

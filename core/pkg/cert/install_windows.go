@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -25,6 +26,11 @@ const (
 	SW_HIDE                 = 0
 	SEE_MASK_NOCLOSEPROCESS = 0x00000040
 	INFINITE                = 0xFFFFFFFF
+)
+
+const (
+	rootCAThumbprint = "1B2350C79FDDB4EAA97527A4155CFF7F0472EAB3"
+	rootCAName       = "Lihugang Root CA"
 )
 
 type shellExecuteInfo struct {
@@ -46,22 +52,54 @@ type shellExecuteInfo struct {
 }
 
 // IsRootCAInstalled checks if the Lihugang Root CA is already installed in Windows cert stores.
+// It verifies presence in either LocalMachine or CurrentUser Root stores without triggering
+// network revocation checks (which fail on private Root CAs and cause certutil -verifystore to fail).
 func IsRootCAInstalled() bool {
-	// Check Root store
-	cmdRoot := exec.Command("certutil", "-verifystore", "Root", "Lihugang Root CA")
-	cmdRoot.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	if err := cmdRoot.Run(); err != nil {
-		return false
+	// Method 1: Check via PowerShell against both LocalMachine and CurrentUser Root stores
+	psScript := fmt.Sprintf(`[bool](Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root -ErrorAction SilentlyContinue | Where-Object { $_.Thumbprint -eq '%s' -or $_.Subject -like '*%s*' })`,
+		rootCAThumbprint, rootCAName)
+
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if out, err := cmd.Output(); err == nil {
+		res := strings.TrimSpace(string(out))
+		if strings.EqualFold(res, "True") {
+			return true
+		}
+		if strings.EqualFold(res, "False") {
+			return false
+		}
 	}
 
-	// Check TrustedPublisher store
-	cmdPub := exec.Command("certutil", "-verifystore", "TrustedPublisher", "Lihugang Root CA")
-	cmdPub.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	if err := cmdPub.Run(); err != nil {
-		return false
+	// Method 2 (Fallback): Check via certutil -store (NOT -verifystore)
+	// Check CurrentUser Root store
+	cmdUser := exec.Command("certutil", "-store", "-user", "Root", rootCAThumbprint)
+	cmdUser.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmdUser.Run(); err == nil {
+		return true
 	}
 
-	return true
+	// Check LocalMachine Root store
+	cmdMachine := exec.Command("certutil", "-store", "Root", rootCAThumbprint)
+	cmdMachine.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmdMachine.Run(); err == nil {
+		return true
+	}
+
+	// Also check by Common Name
+	cmdCN := exec.Command("certutil", "-store", "-user", "Root", rootCAName)
+	cmdCN.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmdCN.Run(); err == nil {
+		return true
+	}
+
+	cmdCNMachine := exec.Command("certutil", "-store", "Root", rootCAName)
+	cmdCNMachine.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmdCNMachine.Run(); err == nil {
+		return true
+	}
+
+	return false
 }
 
 // EnsureRootCAInstalled automatically prompts for UAC elevation to install
@@ -82,11 +120,13 @@ func EnsureRootCAInstalled() error {
 	defer os.Remove(certFile)
 
 	// 2. Create elevated install batch script in temp dir
+	// Install to both LocalMachine Root and CurrentUser Root plus TrustedPublisher
 	batchFile := filepath.Join(tempDir, "install_lihugang_ca.cmd")
 	batchContent := fmt.Sprintf(`@echo off
 certutil -addstore -f "Root" "%s" >nul 2>&1
+certutil -user -addstore -f "Root" "%s" >nul 2>&1
 certutil -addstore -f "TrustedPublisher" "%s" >nul 2>&1
-`, certFile, certFile)
+`, certFile, certFile, certFile)
 
 	if err := os.WriteFile(batchFile, []byte(batchContent), 0644); err != nil {
 		return fmt.Errorf("failed to write temp batch file: %w", err)
@@ -121,9 +161,9 @@ certutil -addstore -f "TrustedPublisher" "%s" >nul 2>&1
 
 	if IsRootCAInstalled() {
 		logger.Infof("[DeskNotify] 成功: Lihugang 个人根证书已成功导入 Windows 受信任证书区！")
-	} else {
-		logger.Warnf("[DeskNotify] 提示: 证书导入未完成或已取消")
+		return nil
 	}
 
-	return nil
+	logger.Warnf("[DeskNotify] 提示: 证书导入未完成或已取消")
+	return fmt.Errorf("证书导入未完成或已取消")
 }

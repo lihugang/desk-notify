@@ -7,6 +7,17 @@
   </head>
   <body class="bg-transparent overflow-hidden select-none">
     <div id="card-app"></div>
+    <script>
+      // Immediate bootstrap hooks so ExecJS calls before Vue mounts are never lost
+      window.__deskNotifyPendingShowLatest = false;
+      window.__deskNotifyPendingMessage = null;
+      window.deskNotifyShowLatest = function() {
+        window.__deskNotifyPendingShowLatest = true;
+      };
+      window.deskNotifyShowMessage = function(msg) {
+        window.__deskNotifyPendingMessage = msg;
+      };
+    </script>
     <script type="module" src="/src/card/main.ts"></script>
   </body>
 </html>

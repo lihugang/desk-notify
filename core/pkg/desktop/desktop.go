@@ -22,6 +22,9 @@ type Manager interface {
 	OpenFile(filePath string) error
 	RevealFile(filePath string) error
 	PinToTaskbar() error
+	CreateDesktopShortcut() error
+	SetAutoStart(enabled bool) error
+	IsAutoStartEnabled() bool
 	Quit()
 }
 

@@ -75,14 +75,7 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 	cfg := s.cfgMgr.Get()
 
 	// Start tunnel
-	_ = s.tunnel.Start(tunnel.Config{
-		Enabled:    cfg.FRP.Enabled,
-		ServerAddr: cfg.FRP.ServerAddr,
-		ServerPort: cfg.FRP.ServerPort,
-		Token:      cfg.FRP.Token,
-		RemotePort: cfg.FRP.RemotePort,
-		LocalPort:  cfg.Port,
-	})
+	_ = s.tunnel.Start(toTunnelConfig(cfg))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/status", s.handleStatus)
@@ -113,12 +106,15 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 	mux.HandleFunc("/api/logs/open", s.handleOpenLogsDir)
 	mux.HandleFunc("/api/open-logs-dir", s.handleOpenLogsDir)
 	mux.HandleFunc("/api/window/pin-taskbar", s.handlePinTaskbar)
+	mux.HandleFunc("/api/window/desktop-shortcut", s.handleDesktopShortcut)
+	mux.HandleFunc("/api/cert/status", s.handleCertStatus)
+	mux.HandleFunc("/api/cert/trust", s.handleCertTrust)
 	mux.HandleFunc("/ws", s.handleWS)
 
 	// Root CA Certificate download endpoints
 	handleCACert := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-		w.Header().Set("Content-Disposition", `attachment; filename="Lihugang-CA.cer"`)
+		w.Header().Set("Content-Disposition", `attachment; filename="DeskNotify-CA.cer"`)
 		_, _ = w.Write(cert.GetRootCACertDER())
 	}
 	mux.HandleFunc("/Lihugang-CA.cer", handleCACert)
@@ -273,8 +269,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"config":       safeConfig,
 			"lanIPs":       lanIPs,
 			"frpPublicUrl": frpUrl,
+			"frpStatus":    s.tunnel.Status(),
 			"frpEnabled":   cfg.FRP.Enabled,
 			"isFirstRun":   s.cfgMgr.IsFirstRun(),
+			"caInstalled":  cert.IsRootCAInstalled(),
 		})
 		return
 	}
@@ -314,6 +312,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.AutoStart != nil {
 			cfg.AutoStart = *req.AutoStart
+			if s.desktop != nil {
+				_ = s.desktop.SetAutoStart(*req.AutoStart)
+			}
 		}
 
 		// Level 2: Advanced & FRP & Security Parameters (Requires admin authentication)
@@ -380,14 +381,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if frpChanged || (isAdmin && (req.FRP != nil || req.LanAuthRequired != nil || newPasswordVal != "")) {
 			if s.tunnel != nil {
 				_ = s.tunnel.Stop()
-				_ = s.tunnel.Start(tunnel.Config{
-					Enabled:    cfg.FRP.Enabled,
-					ServerAddr: cfg.FRP.ServerAddr,
-					ServerPort: cfg.FRP.ServerPort,
-					Token:      cfg.FRP.Token,
-					RemotePort: cfg.FRP.RemotePort,
-					LocalPort:  cfg.Port,
-				})
+				_ = s.tunnel.Start(toTunnelConfig(cfg))
 			}
 		}
 
@@ -1280,7 +1274,70 @@ func (s *Server) handlePinTaskbar(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "已触发固定到底部任务栏",
+	})
+}
+
+func (s *Server) handleDesktopShortcut(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var createErr error
+	if s.desktop != nil {
+		createErr = s.desktop.CreateDesktopShortcut()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if createErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": createErr.Error(),
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "已成功在桌面创建【传纸条】快捷方式",
+	})
+}
+
+func (s *Server) handleCertStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	installed := cert.IsRootCAInstalled()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"installed": installed,
+	})
+}
+
+func (s *Server) handleCertTrust(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	err := cert.EnsureRootCAInstalled()
+	installed := cert.IsRootCAInstalled()
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil && !installed {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":        false,
+			"installed": false,
+			"error":     err.Error(),
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":        true,
+		"installed": installed,
+		"message":   "根证书已成功信任安装",
+	})
 }
 
 func (s *Server) handleHistoryHide(w http.ResponseWriter, r *http.Request) {
@@ -1378,4 +1435,20 @@ func FilterLanIPs(ips []string) []string {
 		return ips192
 	}
 	return ips
+}
+
+func toTunnelConfig(cfg config.AppConfig) tunnel.Config {
+	return tunnel.Config{
+		Enabled:                   cfg.FRP.Enabled,
+		ServerAddr:                cfg.FRP.ServerAddr,
+		ServerPort:                cfg.FRP.ServerPort,
+		Token:                     cfg.FRP.Token,
+		RemotePort:                cfg.FRP.RemotePort,
+		LocalPort:                 cfg.Port,
+		User:                      cfg.FRP.User,
+		ProxyName:                 cfg.FRP.ProxyName,
+		Protocol:                  cfg.FRP.Protocol,
+		TLSEnable:                 cfg.FRP.TLSEnable,
+		DisableCustomTLSFirstByte: cfg.FRP.DisableCustomTLSFirstByte,
+	}
 }

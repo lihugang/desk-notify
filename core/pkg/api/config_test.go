@@ -499,11 +499,15 @@ func TestSecurityConfigHotReload(t *testing.T) {
 	// 2. Save security config with updated FRP settings
 	hotReloadFRPBody, _ := json.Marshal(map[string]interface{}{
 		"frp": map[string]interface{}{
-			"enabled":    true,
-			"serverAddr": "reload.freefrp.net",
-			"serverPort": 7000,
-			"token":      "reload-token",
-			"remotePort": 39999,
+			"enabled":                   true,
+			"serverAddr":                "reload.freefrp.net",
+			"serverPort":                7000,
+			"token":                     "reload-token",
+			"remotePort":                39999,
+			"user":                      "test-user",
+			"proxyName":                 "test-proxy",
+			"tlsEnable":                 true,
+			"disableCustomTLSFirstByte": false,
 		},
 		"lanAuthRequired": true,
 	})
@@ -522,6 +526,17 @@ func TestSecurityConfigHotReload(t *testing.T) {
 	}
 	if ok, _ := frpRes["ok"].(bool); !ok {
 		t.Fatalf("expected ok: true, got %v", frpRes)
+	}
+
+	savedCfg := cfgMgr.Get()
+	if savedCfg.FRP.User != "test-user" || savedCfg.FRP.ProxyName != "test-proxy" {
+		t.Fatalf("expected saved FRP user and proxyName, got user=%s, proxyName=%s", savedCfg.FRP.User, savedCfg.FRP.ProxyName)
+	}
+	if savedCfg.FRP.TLSEnable == nil || !*savedCfg.FRP.TLSEnable {
+		t.Fatalf("expected TLSEnable == true")
+	}
+	if savedCfg.FRP.DisableCustomTLSFirstByte == nil || *savedCfg.FRP.DisableCustomTLSFirstByte {
+		t.Fatalf("expected DisableCustomTLSFirstByte == false")
 	}
 
 	// 3. Verify tunnel was hot-reloaded with the new configuration
