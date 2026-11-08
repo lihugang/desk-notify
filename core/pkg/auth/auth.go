@@ -72,6 +72,37 @@ func IsPublicRequest(r *http.Request) bool {
 	return false
 }
 
+// IsLoopbackRequest checks whether the incoming request originated from the local host (127.0.0.1, ::1, localhost)
+// and was not reverse-proxied from the public internet (frp).
+func IsLoopbackRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if IsPublicRequest(r) {
+		return false
+	}
+
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff != "" {
+		parts := strings.Split(xff, ",")
+		clientIP := strings.TrimSpace(parts[0])
+		ip := net.ParseIP(clientIP)
+		if ip == nil || !ip.IsLoopback() {
+			return false
+		}
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if host == "localhost" {
+		return true
+	}
+	remoteIP := net.ParseIP(host)
+	return remoteIP != nil && remoteIP.IsLoopback()
+}
+
 // HashPassword hashes a plain-text password using bcrypt with default salt cost.
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -151,7 +182,7 @@ func CheckAdminAuth(r *http.Request) bool {
 	authHeader := r.Header.Get("Authorization")
 	if strings.HasPrefix(authHeader, "Bearer ") {
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if ValidateAdminToken(token) {
+		if ValidateAdminToken(token) || ValidateToken(token) {
 			return true
 		}
 	}
@@ -162,10 +193,20 @@ func CheckAdminAuth(r *http.Request) bool {
 		}
 	}
 
+	// Also check dn_token cookie (teacher already authenticated via unified password)
+	if tokenCookie, err := r.Cookie("dn_token"); err == nil && ValidateToken(tokenCookie.Value) {
+		return true
+	}
+
 	return false
 }
 
 func CheckAuth(r *http.Request, cfg config.AppConfig) bool {
+	// 1. Local loopback requests (desktop app, local webview) are always trusted
+	if IsLoopbackRequest(r) {
+		return true
+	}
+
 	isPublic := IsPublicRequest(r)
 
 	// If LAN and no password required, allow

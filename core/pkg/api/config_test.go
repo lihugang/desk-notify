@@ -577,3 +577,92 @@ func TestSecurityConfigHotReload(t *testing.T) {
 		t.Fatalf("expected returned newAdminToken to be valid")
 	}
 }
+
+func TestTeacherLoginConfigUpdateWithoutSecondaryPassword(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "desk_notify_teacher_cfg_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfgMgr, _ := config.NewManagerWithDir(tempDir)
+	store, _ := db.NewStore(tempDir)
+	defer store.Close()
+	fileStorage := storage.NewStorage(tempDir)
+	tun := tunnel.NewMockTunnel()
+	deskMgr := desktop.NewManager()
+
+	srv := NewServer(cfgMgr, store, fileStorage, tun, deskMgr, fstest.MapFS{})
+
+	// 1. Teacher logs in via /api/login with default unified password "123456"
+	loginBody, _ := json.Marshal(map[string]string{"password": "123456"})
+	reqLogin := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewReader(loginBody))
+	wLogin := httptest.NewRecorder()
+	srv.handleLogin(wLogin, reqLogin)
+
+	if wLogin.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from teacher login, got %d", wLogin.Result().StatusCode)
+	}
+
+	cookies := wLogin.Result().Cookies()
+	var dnTokenCookie, dnAdminTokenCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == "dn_token" {
+			dnTokenCookie = c
+		} else if c.Name == "dn_admin_token" {
+			dnAdminTokenCookie = c
+		}
+	}
+	if dnTokenCookie == nil {
+		t.Fatalf("expected dn_token cookie to be set")
+	}
+	if dnAdminTokenCookie == nil {
+		t.Fatalf("expected dn_admin_token cookie to be set")
+	}
+
+	var loginRes map[string]interface{}
+	_ = json.NewDecoder(wLogin.Result().Body).Decode(&loginRes)
+	token, ok := loginRes["token"].(string)
+	if !ok || token == "" {
+		t.Fatalf("expected token in login response")
+	}
+
+	// 2. Teacher directly updates Level 2 settings (FRP, class name, sound, font size) WITHOUT calling /api/config/verify-admin
+	updateCfgBody, _ := json.Marshal(map[string]interface{}{
+		"className":    "高三(6)班",
+		"fontSize":     "22px",
+		"soundEnabled": true,
+		"customSound":  "glass.mp3",
+		"frp": map[string]interface{}{
+			"enabled":    true,
+			"serverAddr": "teacher-frp.test.com",
+			"serverPort": 7000,
+			"token":      "secret123",
+			"remotePort": 23456,
+		},
+	})
+
+	// Test with dn_token cookie directly (simulating teacher browser session without secondary verify-admin)
+	reqCfg := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader(updateCfgBody))
+	reqCfg.AddCookie(dnTokenCookie)
+	wCfg := httptest.NewRecorder()
+	srv.handleConfig(wCfg, reqCfg)
+
+	if wCfg.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from config update with teacher dn_token cookie, got %d", wCfg.Result().StatusCode)
+	}
+
+	saved := cfgMgr.Get()
+	if saved.ClassName != "高三(6)班" {
+		t.Fatalf("expected ClassName to be updated to 高三(6)班, got %s", saved.ClassName)
+	}
+	if saved.FontSize != "22px" {
+		t.Fatalf("expected FontSize to be updated to 22px, got %s", saved.FontSize)
+	}
+	if saved.CustomSound != "glass.mp3" {
+		t.Fatalf("expected CustomSound to be updated to glass.mp3, got %s", saved.CustomSound)
+	}
+	if saved.FRP.ServerAddr != "teacher-frp.test.com" || saved.FRP.RemotePort != 23456 {
+		t.Fatalf("expected FRP to be updated without secondary admin verification, got %+v", saved.FRP)
+	}
+}

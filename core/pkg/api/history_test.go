@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lihugang/desk-notify/core/pkg/auth"
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/lihugang/desk-notify/core/pkg/desktop"
@@ -140,5 +141,81 @@ func TestHistoryPaginationAndDownload(t *testing.T) {
 	}
 	if !strings.Contains(cd, "filename=") {
 		t.Fatalf("expected Content-Disposition to contain filename, got %s", cd)
+	}
+}
+
+func TestHistoryWithLanAuthRequired(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "desk_notify_history_auth_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfgMgr, err := config.NewManagerWithDir(tempDir)
+	if err != nil {
+		t.Fatalf("failed to init config manager: %v", err)
+	}
+	cfg := cfgMgr.Get()
+	cfg.LanAuthRequired = true
+	_ = cfgMgr.Save(cfg)
+
+	store, err := db.NewStore(tempDir)
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer store.Close()
+
+	fileStorage := storage.NewStorage(tempDir)
+	tun := tunnel.NewMockTunnel()
+	desk := desktop.NewManager()
+	srv := NewServer(cfgMgr, store, fileStorage, tun, desk, nil)
+
+	// 1. Loopback request (Desktop app) when LanAuthRequired=true should succeed with 200 OK
+	reqLoopback := httptest.NewRequest("GET", "/api/history?limit=10&offset=0", nil)
+	reqLoopback.RemoteAddr = "127.0.0.1:54321"
+	wLoopback := httptest.NewRecorder()
+	srv.handleHistory(wLoopback, reqLoopback)
+	if wLoopback.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for loopback history request when LanAuthRequired=true, got %d", wLoopback.Code)
+	}
+
+	// 2. LAN request (e.g. mobile app on campus Wi-Fi) when LanAuthRequired=true should succeed with 200 OK
+	reqLAN := httptest.NewRequest("GET", "/api/history?limit=10&offset=0", nil)
+	reqLAN.RemoteAddr = "192.168.1.100:54321"
+	wLAN := httptest.NewRecorder()
+	srv.handleHistory(wLAN, reqLAN)
+	if wLAN.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for LAN history request when LanAuthRequired=true, got %d", wLAN.Code)
+	}
+
+	// 3. Latest notify endpoint when LanAuthRequired=true should also succeed with 200 OK
+	reqLatestLAN := httptest.NewRequest("GET", "/api/notify/latest", nil)
+	reqLatestLAN.RemoteAddr = "192.168.1.100:54321"
+	wLatestLAN := httptest.NewRecorder()
+	srv.handleLatestNotify(wLatestLAN, reqLatestLAN)
+	if wLatestLAN.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for latest notify request when LanAuthRequired=true, got %d", wLatestLAN.Code)
+	}
+
+	// 4. Public request without token when password configured should return 401
+	reqPublic := httptest.NewRequest("GET", "/api/history?limit=10&offset=0", nil)
+	reqPublic.RemoteAddr = "127.0.0.1:54321"
+	reqPublic.Header.Set("X-Forwarded-For", "203.0.113.195") // public frp
+	wPublic := httptest.NewRecorder()
+	srv.handleHistory(wPublic, reqPublic)
+	if wPublic.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for unauthenticated public history request, got %d", wPublic.Code)
+	}
+
+	// 5. Public request with valid token should return 200 OK
+	token, _ := auth.GenerateToken("123456")
+	reqPublicAuth := httptest.NewRequest("GET", "/api/history?limit=10&offset=0", nil)
+	reqPublicAuth.RemoteAddr = "127.0.0.1:54321"
+	reqPublicAuth.Header.Set("X-Forwarded-For", "203.0.113.195")
+	reqPublicAuth.Header.Set("Authorization", "Bearer "+token)
+	wPublicAuth := httptest.NewRecorder()
+	srv.handleHistory(wPublicAuth, reqPublicAuth)
+	if wPublicAuth.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for authenticated public history request, got %d", wPublicAuth.Code)
 	}
 }

@@ -1125,6 +1125,16 @@ onMounted(async () => {
 
 async function fetchStatusAndConfig() {
   try {
+    // If user already holds admin or teacher token in cookie/localStorage, unlock automatically without secondary password prompt
+    if (typeof document !== 'undefined') {
+      if (document.cookie.includes('dn_admin_token') || document.cookie.includes('dn_token') || localStorage.getItem('dn_admin_token') || localStorage.getItem('dn_token')) {
+        isUnlocked.value = true;
+        if (!adminToken.value) {
+          adminToken.value = localStorage.getItem('dn_admin_token') || localStorage.getItem('dn_token') || '';
+        }
+      }
+    }
+
     const res = await fetch('/api/config');
     if (res.ok) {
       const data = await res.json();

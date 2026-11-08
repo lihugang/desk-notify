@@ -386,8 +386,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var respAdminToken string
+		var respUserToken string
 		if newPasswordVal != "" {
-			// If unified password changed, generate new admin token so current session stays authenticated
+			// If unified password changed, generate new admin & user tokens so current session stays authenticated
 			if newToken, err := auth.GenerateAdminToken(); err == nil {
 				respAdminToken = newToken
 				http.SetCookie(w, &http.Cookie{
@@ -395,7 +396,17 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 					Value:    newToken,
 					Path:     "/",
 					HttpOnly: true,
-					MaxAge:   24 * 3600,
+					MaxAge:   7 * 24 * 3600,
+				})
+			}
+			if uToken, err := auth.GenerateToken(newPasswordVal); err == nil {
+				respUserToken = uToken
+				http.SetCookie(w, &http.Cookie{
+					Name:     "dn_token",
+					Value:    uToken,
+					Path:     "/",
+					HttpOnly: true,
+					MaxAge:   7 * 24 * 3600,
 				})
 			}
 		}
@@ -404,6 +415,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":           true,
 			"adminToken":   respAdminToken,
+			"token":        respUserToken,
 			"frpStatus":    s.tunnel.Status(),
 			"frpPublicUrl": s.tunnel.PublicURL(),
 		})
@@ -501,6 +513,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	adminToken, err := auth.GenerateAdminToken()
+	if err != nil {
+		logger.Warnf("[Auth] 生成管理员 Token 失败: %v", err)
+	}
+
 	logger.Infof("[Auth] 教师端口令验证通过 (来源: %s)", r.RemoteAddr)
 
 	http.SetCookie(w, &http.Cookie{
@@ -510,9 +527,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		MaxAge:   7 * 24 * 3600,
 	})
+	if adminToken != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "dn_admin_token",
+			Value:    adminToken,
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   7 * 24 * 3600,
+		})
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "token": token})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":         true,
+		"token":      token,
+		"adminToken": adminToken,
+	})
 }
 
 func (s *Server) handleLatestNotify(w http.ResponseWriter, r *http.Request) {
@@ -726,8 +756,16 @@ func (s *Server) handleCardHeight(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	cfg := s.cfgMgr.Get()
-	if !auth.CheckAuth(r, cfg) {
+	// In LAN or localhost, history notifications can be viewed freely (consistent with /api/notify/latest;
+	// lanAuthRequired is only for posting notifications and admin config).
+	// Public requests via FRP still require authentication if password is configured.
+	if auth.IsPublicRequest(r) && !auth.CheckAuth(r, cfg) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
