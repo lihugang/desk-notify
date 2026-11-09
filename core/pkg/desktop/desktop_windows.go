@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/lihugang/desk-notify/core/pkg/cert"
+	// "github.com/lihugang/desk-notify/core/pkg/cert" (暂时禁用开机自动尝试 UAC 提权信任根证书)
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"github.com/lihugang/desk-notify/core/pkg/db"
 	"github.com/lihugang/desk-notify/core/pkg/logger"
@@ -521,19 +521,19 @@ func (m *windowsManager) IsAutoStartEnabled() bool {
 }
 
 // checkAndApplyStartupDefaults executes the startup verification routine for Windows:
-// 1. Root CA certificate trust (EnsureRootCAInstalled)
+// 1. (Temporarily disabled) Root CA certificate trust (EnsureRootCAInstalled)
 // 2. Autostart on boot (SetAutoStart)
 // 3. Desktop shortcut (CreateDesktopShortcut)
 // 4. Pin to bottom taskbar (PinToTaskbar)
 func (m *windowsManager) checkAndApplyStartupDefaults() {
-	logger.Infof("[DeskNotify] 正在执行应用启动环境检查 (证书信任 / 开机自启 / 桌面快捷方式 / 任务栏固定)...")
+	logger.Infof("[DeskNotify] 正在执行应用启动环境检查 (开机自启 / 桌面快捷方式 / 任务栏固定)...")
 
-	// 1. 证书信任检查与自动补全
-	if err := cert.EnsureRootCAInstalled(); err != nil {
-		logger.Warnf("[DeskNotify] 启动检查 - 根证书信任检查提示: %v", err)
-	} else {
-		logger.Infof("[DeskNotify] 启动检查 - 根证书已受系统信任")
-	}
+	// 1. 证书信任检查与自动补全 (暂时禁用开机自动尝试 UAC 提权信任证书)
+	// if err := cert.EnsureRootCAInstalled(); err != nil {
+	// 	logger.Warnf("[DeskNotify] 启动检查 - 根证书信任检查提示: %v", err)
+	// } else {
+	// 	logger.Infof("[DeskNotify] 启动检查 - 根证书已受系统信任")
+	// }
 
 	// 2. 开机自启检查与自动配置
 	if err := m.SetAutoStart(true); err != nil {

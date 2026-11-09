@@ -144,32 +144,6 @@
             </div>
           </div>
         </div>
-
-        <!-- Root CA Certificate Info & Download -->
-        <div class="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div class="space-y-0.5">
-            <div class="flex items-center gap-2">
-              <p class="font-semibold text-indigo-900">传纸条根证书 (HTTPS)</p>
-              <span
-                class="px-2 py-0.5 rounded-full text-[10px] font-medium"
-                :class="caInstalled ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-amber-100 text-amber-700 border border-amber-200'"
-              >
-                {{ caInstalled ? '✓ 本机已受信任' : '未受信任' }}
-              </span>
-            </div>
-            <p class="text-[11px] text-indigo-600/80">软件启动时会自动检查并信任根证书。如需在外接手机或平板安装证书，请点击右侧下载</p>
-          </div>
-          <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
-            <a
-              href="/DeskNotify-CA.cer"
-              download="DeskNotify-CA.cer"
-              class="px-3 py-1.5 bg-white hover:bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-700 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5"
-            >
-              <Download class="w-3.5 h-3.5" />
-              <span>下载根证书 (.cer)</span>
-            </a>
-          </div>
-        </div>
       </div>
 
       <!-- Tab 2: Level 1 Basic Configuration -->
@@ -1077,14 +1051,6 @@ const displayAddresses = computed<AddressItem[]>(() => {
       badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
       url: `http://${ip}:${basePort}`,
       desc: '手机连接同一教室/校园 Wi-Fi 即可扫码直接投递'
-    });
-    list.push({
-      id: `https-${ip}`,
-      type: '局域网 HTTPS (推荐)',
-      badge: 'HTTPS 加密',
-      badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-      url: `https://${ip}:${basePort + 1}`,
-      desc: '加密通道，支持在手机上安装 PWA 桌面独立快捷方式'
     });
   }
 

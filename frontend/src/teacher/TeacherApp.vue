@@ -490,61 +490,140 @@
               />
             </div>
 
-            <!-- FRP 公网穿透配置 -->
-            <div class="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+            <!-- FRP 公网穿透配置 (支持 FreeFRP 与 OpenFrp) -->
+            <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
               <div class="flex items-center justify-between">
                 <div>
-                  <label class="block font-semibold text-slate-800">暴露服务到公网 (FRP 内网穿透)</label>
-                  <p class="text-[11px] text-slate-400 mt-0.5">支持校外、家中或 4G/5G 手机网络远程投递通知与调整配置</p>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-semibold text-slate-800">暴露服务到公网 (FRP / OpenFrp)</span>
+                    <button
+                      v-if="settingsConfig.frp && settingsConfig.frp.enabled"
+                      type="button"
+                      @click="showFrpImportModal = true"
+                      class="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded text-[11px] font-medium border border-blue-200/60 transition flex items-center gap-1 cursor-pointer"
+                    >
+                      <Download class="w-3 h-3" />
+                      <span>导入配置 (TOML/INI)</span>
+                    </button>
+                    <button
+                      v-if="settingsConfig.frp && settingsConfig.frp.enabled"
+                      type="button"
+                      @click="resetToFreeFRP"
+                      class="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[11px] font-medium border border-slate-200/60 transition flex items-center gap-1 cursor-pointer"
+                      title="重置为默认 FreeFRP 公共节点配置"
+                    >
+                      <RotateCcw class="w-3 h-3" />
+                      <span>恢复 FreeFRP 默认</span>
+                    </button>
+                  </div>
+                  <p class="text-[11px] text-slate-400 mt-0.5">支持内置 FreeFRP 或导入 OpenFrp 节点，开启后校外教师可在任意网络扫码投递</p>
                 </div>
                 <input
                   v-model="settingsConfig.frp.enabled"
                   type="checkbox"
-                  class="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                  class="w-4 h-4 rounded text-blue-600 cursor-pointer"
                 />
               </div>
 
-              <div v-if="settingsConfig.frp && settingsConfig.frp.enabled" class="space-y-2 pt-2 border-t border-slate-200">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <label class="block text-[11px] font-medium text-slate-500 mb-1">FRP 服务器地址</label>
+              <div v-if="settingsConfig.frp && settingsConfig.frp.enabled" class="space-y-3 bg-white p-3.5 rounded-xl border border-slate-200/80 mt-2">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div class="sm:col-span-2">
+                    <label class="block text-[11px] font-medium text-slate-500 mb-1">FRP 服务器地址 (Server Addr)</label>
                     <input
                       v-model="settingsConfig.frp.serverAddr"
                       type="text"
-                      class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                      placeholder="frp.freefrp.net"
+                      placeholder="如 cn-hk-bgp-4.ofalias.net 或 frp.freefrp.net"
+                      class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
                     />
                   </div>
                   <div>
-                    <label class="block text-[11px] font-medium text-slate-500 mb-1">FRP 服务端端口</label>
+                    <label class="block text-[11px] font-medium text-slate-500 mb-1">服务器端口 (Port)</label>
                     <input
                       v-model.number="settingsConfig.frp.serverPort"
                       type="number"
-                      class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                      placeholder="7000"
+                      placeholder="7000 或 8120"
+                      class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
                     />
                   </div>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-[11px] font-medium text-slate-500 mb-1">用户标识 User (OpenFrp 专属，普通 FRP 留空)</label>
+                    <input
+                      v-model="settingsConfig.frp.user"
+                      type="text"
+                      placeholder="OpenFrp 用户标识 (user)"
+                      class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white font-mono"
+                    />
+                  </div>
                   <div>
                     <label class="block text-[11px] font-medium text-slate-500 mb-1">通信密钥 Token</label>
                     <input
                       v-model="settingsConfig.frp.token"
                       type="password"
-                      class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                      placeholder="freefrp.net"
+                      placeholder="认证 Token"
+                      class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-[11px] font-medium text-slate-500 mb-1">隧道名称 (Proxy Name)</label>
+                    <input
+                      v-model="settingsConfig.frp.proxyName"
+                      type="text"
+                      placeholder="如 test (留空自动生成)"
+                      class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white font-mono"
                     />
                   </div>
                   <div>
-                    <label class="block text-[11px] font-medium text-slate-500 mb-1">公网远程端口 RemotePort</label>
+                    <label class="block text-[11px] font-medium text-slate-500 mb-1">远程绑定端口 (Remote Port)</label>
                     <input
                       v-model.number="settingsConfig.frp.remotePort"
                       type="number"
-                      class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                      placeholder="28932"
+                      placeholder="如 50847"
+                      class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:bg-white font-mono"
                     />
                   </div>
+                </div>
+
+                <!-- TLS Options -->
+                <div class="p-2.5 bg-slate-50/80 rounded-lg border border-slate-200/60 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <span class="text-[11px] font-medium text-slate-700">传输加密 TLS (transport.tls.enable)</span>
+                      <p class="text-[10px] text-slate-400">OpenFrp 节点建议勾选；内置 FreeFRP 通常保持关闭</p>
+                    </div>
+                    <input
+                      v-model="settingsConfig.frp.tlsEnable"
+                      type="checkbox"
+                      class="w-3.5 h-3.5 rounded text-blue-600 cursor-pointer"
+                    />
+                  </div>
+
+                  <div v-if="settingsConfig.frp.tlsEnable" class="flex items-center justify-between pt-1 border-t border-slate-200/40">
+                    <div>
+                      <span class="text-[11px] font-medium text-slate-700">禁用自定义首字节 (disableCustomTLSFirstByte)</span>
+                      <p class="text-[10px] text-slate-400">OpenFrp 节点建议关闭 (false)；标准原版节点若连不上可尝试开启 (true)</p>
+                    </div>
+                    <input
+                      v-model="settingsConfig.frp.disableCustomTLSFirstByte"
+                      type="checkbox"
+                      class="w-3.5 h-3.5 rounded text-blue-600 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                <div class="text-[11px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200/60 flex items-center justify-between flex-wrap gap-1">
+                  <div>
+                    <span>外网访问地址：</span>
+                    <span class="font-mono text-blue-600 font-semibold">{{ settingsFrpUrl || ('http://' + (settingsConfig.frp.serverAddr || 'frp.freefrp.net') + ':' + settingsConfig.frp.remotePort) }}</span>
+                  </div>
+                  <span v-if="settingsFrpStatus" :class="settingsFrpStatus === 'connected' ? 'text-emerald-600 font-medium' : 'text-slate-400'">
+                    {{ settingsFrpStatus === 'connected' ? '● 已连接' : settingsFrpStatus === 'connecting' ? '◌ 连接中...' : '○ 未连接' }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -622,6 +701,71 @@
         </div>
       </div>
     </div>
+
+    <!-- FRP Import Modal -->
+    <div
+      v-if="showFrpImportModal"
+      class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[60] animate-fade-in"
+      @click.self="showFrpImportModal = false"
+    >
+      <div class="bg-white rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div class="flex items-center gap-2">
+            <Download class="w-4 h-4 text-blue-600" />
+            <h3 class="text-sm font-bold text-slate-800">一键导入 FRP / OpenFrp 配置</h3>
+          </div>
+          <button type="button" @click="showFrpImportModal = false" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer">
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+
+        <p class="text-xs text-slate-500 leading-relaxed">
+          直接将从 OpenFrp 或其他平台复制的配置文件文本（支持 <code>frpc.toml</code> 或旧版 <code>frpc.ini</code>）粘贴在下方，系统将自动识别并回填各项参数：
+        </p>
+
+        <textarea
+          v-model="frpImportText"
+          rows="10"
+          placeholder="例如：
+serverAddr = 'cn-hk-bgp-4.ofalias.net'
+serverPort = 8120
+user = 'f58dbf7c...'
+
+[auth]
+token = '...'
+
+[[proxies]]
+name = 'test'
+remotePort = 50847
+
+[transport.tls]
+disableCustomTLSFirstByte = false
+enable = true"
+          class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:bg-white resize-none"
+        ></textarea>
+
+        <div v-if="frpImportError" class="text-xs text-rose-500 bg-rose-50 p-2.5 rounded-lg border border-rose-100">
+          {{ frpImportError }}
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            @click="showFrpImportModal = false"
+            class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            @click="applyFrpImport"
+            class="px-5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition cursor-pointer"
+          >
+            解析并填入
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -631,13 +775,14 @@ import {
   Bell, Lock, Bold, Italic, Heading2, List, Quote,
   ImageIcon, Paperclip, Send, X, FileText, Pin, ZoomIn, Eye, Edit3,
   UploadCloud, Settings, Sliders, Shield, QrCode, Volume2, Square,
-  Check, Copy
+  Check, Copy, Download, RotateCcw
 } from 'lucide-vue-next';
 import { marked } from 'marked';
 import QRCode from 'qrcode';
 import HistoryList from '../components/HistoryList.vue';
 import ImageLightbox from '../components/ImageLightbox.vue';
 import { spaceText, spacePage } from '../utils/pangu';
+import { parseFRPConfigText } from '../utils/frpParser';
 
 interface UploadItem {
   file: File;
@@ -773,7 +918,12 @@ const settingsConfig = ref<any>({
     serverAddr: 'frp.freefrp.net',
     serverPort: 7000,
     token: 'freefrp.net',
-    remotePort: 28932
+    remotePort: 28932,
+    user: '',
+    proxyName: '',
+    protocol: 'tcp',
+    tlsEnable: false,
+    disableCustomTLSFirstByte: false
   }
 });
 const settingsLanIPs = ref<string[]>([]);
@@ -783,6 +933,85 @@ const settingsSaving = ref(false);
 const settingsNewPassword = ref('');
 const isPlayingSound = ref(false);
 let previewAudio: HTMLAudioElement | null = null;
+
+const showFrpImportModal = ref(false);
+const frpImportText = ref('');
+const frpImportError = ref('');
+
+function applyFrpImport() {
+  frpImportError.value = '';
+  if (!frpImportText.value.trim()) {
+    frpImportError.value = '请粘贴配置文件内容 (支持 TOML / INI 格式)';
+    return;
+  }
+  const parsed = parseFRPConfigText(frpImportText.value);
+  if (!parsed.serverAddr && !parsed.token && !parsed.user && !parsed.remotePort) {
+    frpImportError.value = '未能解析到有效的 FRP 配置项，请确认内容格式';
+    return;
+  }
+
+  if (!settingsConfig.value.frp) {
+    settingsConfig.value.frp = {
+      enabled: true,
+      serverAddr: '',
+      serverPort: 7000,
+      token: '',
+      remotePort: 0,
+      user: '',
+      proxyName: '',
+      protocol: 'tcp',
+      tlsEnable: false,
+      disableCustomTLSFirstByte: false
+    };
+  }
+
+  if (parsed.serverAddr) settingsConfig.value.frp.serverAddr = parsed.serverAddr;
+  if (parsed.serverPort) settingsConfig.value.frp.serverPort = parsed.serverPort;
+  if (parsed.user !== undefined) settingsConfig.value.frp.user = parsed.user;
+  if (parsed.token) settingsConfig.value.frp.token = parsed.token;
+  if (parsed.remotePort) settingsConfig.value.frp.remotePort = parsed.remotePort;
+  if (parsed.proxyName !== undefined) settingsConfig.value.frp.proxyName = parsed.proxyName;
+  if (parsed.protocol) settingsConfig.value.frp.protocol = parsed.protocol;
+  if (parsed.tlsEnable !== undefined) settingsConfig.value.frp.tlsEnable = parsed.tlsEnable;
+  if (parsed.disableCustomTLSFirstByte !== undefined) {
+    settingsConfig.value.frp.disableCustomTLSFirstByte = parsed.disableCustomTLSFirstByte;
+  }
+  settingsConfig.value.frp.enabled = true;
+
+  showFrpImportModal.value = false;
+  frpImportText.value = '';
+  frpImportError.value = '';
+  alert('配置导入并解析成功！已自动填充表单各项参数，请点击“保存配置”以生效。');
+}
+
+function resetToFreeFRP() {
+  if (!settingsConfig.value.frp) {
+    settingsConfig.value.frp = {
+      enabled: true,
+      serverAddr: 'frp.freefrp.net',
+      serverPort: 7000,
+      token: 'freefrp.net',
+      remotePort: 28932,
+      user: '',
+      proxyName: '',
+      protocol: 'tcp',
+      tlsEnable: false,
+      disableCustomTLSFirstByte: false
+    };
+  }
+  settingsConfig.value.frp.serverAddr = 'frp.freefrp.net';
+  settingsConfig.value.frp.serverPort = 7000;
+  settingsConfig.value.frp.token = 'freefrp.net';
+  settingsConfig.value.frp.user = '';
+  settingsConfig.value.frp.proxyName = '';
+  settingsConfig.value.frp.protocol = 'tcp';
+  settingsConfig.value.frp.tlsEnable = false;
+  settingsConfig.value.frp.disableCustomTLSFirstByte = false;
+  if (!settingsConfig.value.frp.remotePort) {
+    settingsConfig.value.frp.remotePort = 10001 + Math.floor(Math.random() * 39999);
+  }
+  alert('已重置为默认 FreeFRP 节点配置，请点击“保存配置”以应用。');
+}
 
 const soundPresets = [
   { id: 'glass.mp3', label: '清脆风铃', desc: '灵动通透' },
@@ -862,15 +1091,19 @@ async function openSettingsModal() {
     if (res.ok) {
       const data = await res.json();
       settingsConfig.value = JSON.parse(JSON.stringify(data.config || {}));
-      if (!settingsConfig.value.frp) {
-        settingsConfig.value.frp = {
-          enabled: false,
-          serverAddr: 'frp.freefrp.net',
-          serverPort: 7000,
-          token: 'freefrp.net',
-          remotePort: 28932
-        };
-      }
+      settingsConfig.value.frp = {
+        enabled: false,
+        serverAddr: 'frp.freefrp.net',
+        serverPort: 7000,
+        token: 'freefrp.net',
+        remotePort: 28932,
+        user: '',
+        proxyName: '',
+        protocol: 'tcp',
+        tlsEnable: false,
+        disableCustomTLSFirstByte: false,
+        ...(settingsConfig.value.frp || {})
+      };
       settingsLanIPs.value = data.lanIPs || ['127.0.0.1'];
       settingsFrpUrl.value = data.frpPublicUrl || '';
       settingsFrpStatus.value = data.frpStatus || '';
@@ -921,6 +1154,12 @@ async function saveTeacherSettings() {
       }
       if (data.token) {
         localStorage.setItem('dn_token', data.token);
+      }
+      if (data.frpStatus) {
+        settingsFrpStatus.value = data.frpStatus;
+      }
+      if (data.frpPublicUrl) {
+        settingsFrpUrl.value = data.frpPublicUrl;
       }
       classroomName.value = settingsConfig.value.className || classroomName.value;
       showSettingsModal.value = false;

@@ -57,7 +57,8 @@ jobs:
         run: |
           mkdir -p build
           # -H=windowsgui ensures the app runs silently without a console window
-          go build -tags frp -ldflags "-H=windowsgui -s -w" -o build/DeskNotify.exe ./core
+          # -tags "production,frp" disables Wails v3 devtools and context menus at native WebView2 level
+          go build -tags "production,frp" -ldflags "-H=windowsgui -s -w" -o build/DeskNotify.exe ./core
 
       - name: Sign Windows Executable (Authenticode)
         if: env.WINDOWS_CERT_BASE64 != ''

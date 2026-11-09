@@ -1,7 +1,12 @@
 package config
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	cryptorand "crypto/rand"
 	"encoding/json"
+	"errors"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -12,6 +17,50 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+// configKey is the 32-byte AES-256 key embedded directly in the application binary for config encryption.
+var configKey = []byte("DeskNotify_Encrypted_Config_2026")
+
+// encryptAES encrypts plaintext using AES-GCM with the embedded key.
+func encryptAES(plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(configKey)
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(cryptorand.Reader, nonce); err != nil {
+		return nil, err
+	}
+
+	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+// decryptAES decrypts ciphertext using AES-GCM with the embedded key.
+func decryptAES(ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(configKey)
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return nil, errors.New("ciphertext too short")
+	}
+
+	nonce, encryptedData := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	return gcm.Open(nil, nonce, encryptedData, nil)
+}
 
 type FRPConfig struct {
 	Enabled                   bool   `json:"enabled"`
@@ -250,7 +299,11 @@ func (m *Manager) Load() error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, &m.cfg)
+	decrypted, err := decryptAES(data)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(decrypted, &m.cfg)
 }
 
 func (m *Manager) Save(cfg AppConfig) error {
@@ -262,7 +315,11 @@ func (m *Manager) Save(cfg AppConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.configPath, data, 0644)
+	encrypted, err := encryptAES(data)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.configPath, encrypted, 0644)
 }
 
 func (m *Manager) GetDataDir() string {
