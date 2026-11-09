@@ -276,10 +276,21 @@ function setupObserver() {
   }
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = localStorage.getItem('dn_token') || localStorage.getItem('dn_admin_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 async function fetchInitial() {
   loading.value = true;
   try {
-    const res = await fetch(`/api/history?limit=${limit.value}&offset=0`);
+    const res = await fetch(`/api/history?limit=${limit.value}&offset=0`, {
+      headers: getAuthHeaders()
+    });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -305,7 +316,9 @@ async function loadMore() {
   const currentOffset = items.value.length;
 
   try {
-    const res = await fetch(`/api/history?limit=${limit.value}&offset=${currentOffset}`);
+    const res = await fetch(`/api/history?limit=${limit.value}&offset=${currentOffset}`, {
+      headers: getAuthHeaders()
+    });
     if (res.ok) {
       const data = await res.json();
       const newItems: NotificationMessage[] = Array.isArray(data) ? data : (data.items || []);

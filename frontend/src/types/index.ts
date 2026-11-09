@@ -51,6 +51,7 @@ export interface AppConfig {
     protocol?: string;
     tlsEnable?: boolean;
     disableCustomTLSFirstByte?: boolean;
+    serverName?: string;
   };
 }
 

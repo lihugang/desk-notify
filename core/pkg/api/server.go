@@ -35,14 +35,17 @@ var upgrader = websocket.Upgrader{
 }
 
 type Server struct {
-	cfgMgr     *config.Manager
-	store      *db.Store
-	storage    *storage.Storage
-	tunnel     tunnel.Tunnel
-	desktop    desktop.Manager
-	staticFS   fs.FS
-	httpServer *http.Server
-	httpsServer *http.Server
+	cfgMgr         *config.Manager
+	store          *db.Store
+	storage        *storage.Storage
+	tunnel         tunnel.Tunnel
+	desktop        desktop.Manager
+	staticFS       fs.FS
+	httpServer     *http.Server
+	httpsServer    *http.Server
+	tunnelServer   *http.Server
+	tunnelListener net.Listener
+	tunnelPort     int
 
 	mu      sync.RWMutex
 	clients map[*websocket.Conn]bool
@@ -67,15 +70,22 @@ func NewServer(
 	}
 }
 
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
 func (s *Server) Start() error {
 	return s.StartWithReady(nil)
 }
 
 func (s *Server) StartWithReady(ready chan<- struct{}) error {
 	cfg := s.cfgMgr.Get()
-
-	// Start tunnel
-	_ = s.tunnel.Start(toTunnelConfig(cfg))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/status", s.handleStatus)
@@ -137,11 +147,6 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 		})
 	}
 
-	type statusRecorder struct {
-		http.ResponseWriter
-		status int
-	}
-
 	loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/ws" {
 			mux.ServeHTTP(w, r)
@@ -157,13 +162,38 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 		}
 	})
 
+	// 1. Initialize dedicated internal tunnel listener for FRP on loopback
+	tunnelLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err == nil {
+		s.tunnelListener = tunnelLn
+		s.tunnelPort = tunnelLn.Addr().(*net.TCPAddr).Port
+		tunnelHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := auth.WithTunnelContext(r.Context())
+			loggingHandler.ServeHTTP(w, r.WithContext(ctx))
+		})
+		s.tunnelServer = &http.Server{
+			Handler: tunnelHandler,
+		}
+		go func() {
+			if err := s.tunnelServer.Serve(tunnelLn); err != nil && err != http.ErrServerClosed {
+				logger.Errorf("[DeskNotify] 内部 FRP 专用穿透转发服务异常: %v", err)
+			}
+		}()
+		logger.Infof("[DeskNotify] 内部 FRP 专用穿透端口已就绪: 127.0.0.1:%d", s.tunnelPort)
+	} else {
+		logger.Warnf("[DeskNotify] 启动内部 FRP 专用穿透监听失败: %v", err)
+	}
+
+	// 2. Start FRP tunnel (forwarding to dedicated tunnel port)
+	_ = s.tunnel.Start(s.toTunnelConfig(cfg))
+
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	s.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: loggingHandler,
 	}
 
-	// 1. Initialize local TLS Server Certificate (signed by embedded DeskNotify Root CA)
+	// 3. Initialize local TLS Server Certificate (signed by embedded DeskNotify Root CA)
 	dataDir := s.cfgMgr.GetDataDir()
 	certFile, keyFile, err := cert.EnsureServerCertificate(dataDir)
 	if err == nil {
@@ -197,6 +227,12 @@ func (s *Server) StartWithReady(ready chan<- struct{}) error {
 
 func (s *Server) Stop() error {
 	_ = s.tunnel.Stop()
+	if s.tunnelServer != nil {
+		_ = s.tunnelServer.Close()
+	}
+	if s.tunnelListener != nil {
+		_ = s.tunnelListener.Close()
+	}
 	if s.httpsServer != nil {
 		_ = s.httpsServer.Close()
 	}
@@ -381,7 +417,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if frpChanged || (isAdmin && (req.FRP != nil || req.LanAuthRequired != nil || newPasswordVal != "")) {
 			if s.tunnel != nil {
 				_ = s.tunnel.Stop()
-				_ = s.tunnel.Start(toTunnelConfig(cfg))
+				_ = s.tunnel.Start(s.toTunnelConfig(cfg))
 			}
 		}
 
@@ -673,12 +709,25 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sender := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+			sender = strings.TrimSpace(parts[0])
+		}
+	} else if auth.IsTunnelRequest(r) || auth.IsPublicRequest(r) {
+		sender = "公网穿透"
+		if r.Host != "" {
+			sender = fmt.Sprintf("公网穿透 (%s)", r.Host)
+		}
+	}
+
 	n := &db.Notification{
 		ID:        notifyID,
 		Content:   content,
 		Pinned:    pinned,
 		Duration:  duration,
-		Sender:    r.RemoteAddr,
+		Sender:    sender,
 		CreatedAt: time.Now(),
 	}
 
@@ -1036,6 +1085,12 @@ func (s *Server) processFileReveal(w http.ResponseWriter, r *http.Request, attID
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfgMgr.Get()
+	if auth.IsPublicRequest(r) && !auth.CheckAuth(r, cfg) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Warnf("[WS] 升级 WebSocket 失败 (%s): %v", r.RemoteAddr, err)
@@ -1483,18 +1538,23 @@ func FilterLanIPs(ips []string) []string {
 	return ips
 }
 
-func toTunnelConfig(cfg config.AppConfig) tunnel.Config {
+func (s *Server) toTunnelConfig(cfg config.AppConfig) tunnel.Config {
+	localPort := cfg.Port
+	if s != nil && s.tunnelPort > 0 {
+		localPort = s.tunnelPort
+	}
 	return tunnel.Config{
 		Enabled:                   cfg.FRP.Enabled,
 		ServerAddr:                cfg.FRP.ServerAddr,
 		ServerPort:                cfg.FRP.ServerPort,
 		Token:                     cfg.FRP.Token,
 		RemotePort:                cfg.FRP.RemotePort,
-		LocalPort:                 cfg.Port,
+		LocalPort:                 localPort,
 		User:                      cfg.FRP.User,
 		ProxyName:                 cfg.FRP.ProxyName,
 		Protocol:                  cfg.FRP.Protocol,
 		TLSEnable:                 cfg.FRP.TLSEnable,
 		DisableCustomTLSFirstByte: cfg.FRP.DisableCustomTLSFirstByte,
+		ServerName:                cfg.FRP.ServerName,
 	}
 }

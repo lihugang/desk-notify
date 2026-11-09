@@ -614,6 +614,20 @@
                       class="w-3.5 h-3.5 rounded text-blue-600 cursor-pointer"
                     />
                   </div>
+
+                  <div v-if="settingsConfig.frp.tlsEnable" class="pt-1.5 border-t border-slate-200/40">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-[11px] font-medium text-slate-700">TLS SNI 域名 (serverName)</span>
+                      <span class="text-[10px] text-slate-400">选填，留空默认同服务器地址</span>
+                    </div>
+                    <input
+                      v-model="settingsConfig.frp.serverName"
+                      type="text"
+                      placeholder="例如 n9d9.openfrp.net"
+                      class="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 font-mono text-slate-800"
+                    />
+                    <p class="text-[10px] text-slate-400 mt-0.5">OpenFrp 节点或特定反向代理常要求匹配此 SNI 证书域名</p>
+                  </div>
                 </div>
 
                 <div class="text-[11px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200/60 flex items-center justify-between flex-wrap gap-1">
@@ -740,7 +754,8 @@ remotePort = 50847
 
 [transport.tls]
 disableCustomTLSFirstByte = false
-enable = true"
+enable = true
+serverName = 'n9d9.openfrp.net'"
           class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:bg-white resize-none"
         ></textarea>
 
@@ -856,7 +871,12 @@ onUnmounted(() => {
 
 async function checkAuthAndStatus() {
   try {
-    const res = await fetch('/api/status');
+    const headers: Record<string, string> = {};
+    const token = localStorage.getItem('dn_token') || localStorage.getItem('dn_admin_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch('/api/status', { headers });
     if (res.status === 401) {
       authRequired.value = true;
       authenticated.value = false;
@@ -923,7 +943,8 @@ const settingsConfig = ref<any>({
     proxyName: '',
     protocol: 'tcp',
     tlsEnable: false,
-    disableCustomTLSFirstByte: false
+    disableCustomTLSFirstByte: false,
+    serverName: ''
   }
 });
 const settingsLanIPs = ref<string[]>([]);
@@ -961,7 +982,8 @@ function applyFrpImport() {
       proxyName: '',
       protocol: 'tcp',
       tlsEnable: false,
-      disableCustomTLSFirstByte: false
+      disableCustomTLSFirstByte: false,
+      serverName: ''
     };
   }
 
@@ -975,6 +997,9 @@ function applyFrpImport() {
   if (parsed.tlsEnable !== undefined) settingsConfig.value.frp.tlsEnable = parsed.tlsEnable;
   if (parsed.disableCustomTLSFirstByte !== undefined) {
     settingsConfig.value.frp.disableCustomTLSFirstByte = parsed.disableCustomTLSFirstByte;
+  }
+  if (parsed.serverName !== undefined) {
+    settingsConfig.value.frp.serverName = parsed.serverName;
   }
   settingsConfig.value.frp.enabled = true;
 
@@ -996,7 +1021,8 @@ function resetToFreeFRP() {
       proxyName: '',
       protocol: 'tcp',
       tlsEnable: false,
-      disableCustomTLSFirstByte: false
+      disableCustomTLSFirstByte: false,
+      serverName: ''
     };
   }
   settingsConfig.value.frp.serverAddr = 'frp.freefrp.net';
@@ -1007,6 +1033,7 @@ function resetToFreeFRP() {
   settingsConfig.value.frp.protocol = 'tcp';
   settingsConfig.value.frp.tlsEnable = false;
   settingsConfig.value.frp.disableCustomTLSFirstByte = false;
+  settingsConfig.value.frp.serverName = '';
   if (!settingsConfig.value.frp.remotePort) {
     settingsConfig.value.frp.remotePort = 10001 + Math.floor(Math.random() * 39999);
   }
@@ -1087,7 +1114,12 @@ function renderSettingsQr(url: string, el: any) {
 
 async function openSettingsModal() {
   try {
-    const res = await fetch('/api/config');
+    const headers: Record<string, string> = {};
+    const token = localStorage.getItem('dn_admin_token') || localStorage.getItem('dn_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch('/api/config', { headers });
     if (res.ok) {
       const data = await res.json();
       settingsConfig.value = JSON.parse(JSON.stringify(data.config || {}));
@@ -1102,6 +1134,7 @@ async function openSettingsModal() {
         protocol: 'tcp',
         tlsEnable: false,
         disableCustomTLSFirstByte: false,
+        serverName: '',
         ...(settingsConfig.value.frp || {})
       };
       settingsLanIPs.value = data.lanIPs || ['127.0.0.1'];
@@ -1345,8 +1378,15 @@ async function handleSubmit() {
       formData.append('attachments', att.file);
     });
 
+    const headers: Record<string, string> = {};
+    const token = localStorage.getItem('dn_token') || localStorage.getItem('dn_admin_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch('/api/notify', {
       method: 'POST',
+      headers,
       body: formData
     });
 

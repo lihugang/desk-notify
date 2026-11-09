@@ -76,6 +76,9 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 		if cfg.DisableCustomTLSFirstByte != nil {
 			clientCfg.Transport.TLS.DisableCustomTLSFirstByte = cfg.DisableCustomTLSFirstByte
 		}
+		if cfg.ServerName != "" {
+			clientCfg.Transport.TLS.ServerName = cfg.ServerName
+		}
 
 		loginFailExit := false
 		clientCfg.LoginFailExit = &loginFailExit
@@ -120,7 +123,11 @@ func (f *FRPTunnel) Start(cfg tunnel.Config) error {
 
 		tlsStatus := "关闭"
 		if clientCfg.Transport.TLS.Enable != nil && *clientCfg.Transport.TLS.Enable {
-			tlsStatus = "开启"
+			if cfg.ServerName != "" {
+				tlsStatus = fmt.Sprintf("开启 (SNI: %s)", cfg.ServerName)
+			} else {
+				tlsStatus = "开启"
+			}
 		}
 		logger.Infof("[DeskNotify FRP] 穿透服务启动中: 隧道 [%s] 远程端口 %d -> 本地端口 %d (服务器: %s:%d, TLS: %s)",
 			proxyCfg.Name, cfg.RemotePort, cfg.LocalPort, cfg.ServerAddr, cfg.ServerPort, tlsStatus)

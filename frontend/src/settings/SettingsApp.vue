@@ -712,6 +712,20 @@
                     class="w-3.5 h-3.5 rounded text-blue-600 cursor-pointer"
                   />
                 </div>
+
+                <div v-if="config.frp.tlsEnable" class="pt-1.5 border-t border-slate-200/40">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-[11px] font-medium text-slate-700">TLS SNI 域名 (serverName)</span>
+                    <span class="text-[10px] text-slate-400">选填，留空默认同服务器地址</span>
+                  </div>
+                  <input
+                    v-model="config.frp.serverName"
+                    type="text"
+                    placeholder="例如 n9d9.openfrp.net"
+                    class="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 font-mono text-slate-800"
+                  />
+                  <p class="text-[10px] text-slate-400 mt-0.5">OpenFrp 节点或特定反向代理常要求匹配此 SNI 证书域名</p>
+                </div>
               </div>
 
               <div class="text-[11px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200/60 flex items-center justify-between">
@@ -817,7 +831,8 @@ remotePort = 50847
 
 [transport.tls]
 disableCustomTLSFirstByte = false
-enable = true"
+enable = true
+serverName = 'n9d9.openfrp.net'"
           class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:bg-white resize-none"
         ></textarea>
 
@@ -913,6 +928,9 @@ function applyFrpImport() {
   if (parsed.disableCustomTLSFirstByte !== undefined) {
     config.value.frp.disableCustomTLSFirstByte = parsed.disableCustomTLSFirstByte;
   }
+  if (parsed.serverName !== undefined) {
+    config.value.frp.serverName = parsed.serverName;
+  }
   config.value.frp.enabled = true;
 
   showFrpImportModal.value = false;
@@ -930,6 +948,7 @@ function resetToFreeFRP() {
   config.value.frp.protocol = 'tcp';
   config.value.frp.tlsEnable = false;
   config.value.frp.disableCustomTLSFirstByte = false;
+  config.value.frp.serverName = '';
   if (!config.value.frp.remotePort) {
     config.value.frp.remotePort = 10001 + Math.floor(Math.random() * 39999);
   }
@@ -995,7 +1014,8 @@ const config = ref<AppConfig>({
     proxyName: '',
     protocol: 'tcp',
     tlsEnable: false,
-    disableCustomTLSFirstByte: false
+    disableCustomTLSFirstByte: false,
+    serverName: ''
   }
 });
 

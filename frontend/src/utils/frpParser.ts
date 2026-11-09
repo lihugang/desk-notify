@@ -8,6 +8,7 @@ export interface ParsedFRPConfig {
   protocol?: string;
   tlsEnable?: boolean;
   disableCustomTLSFirstByte?: boolean;
+  serverName?: string;
 }
 
 /**
@@ -107,6 +108,12 @@ export function parseFRPConfigText(rawText: string): ParsedFRPConfig {
       (currentSection === 'transport.tls' && keyLower === 'disablecustomtlsfirstbyte')
     ) {
       result.disableCustomTLSFirstByte = valLower === 'true' || valLower === '1';
+    } else if (
+      (currentSection === 'transport.tls' && keyLower === 'servername') ||
+      keyLower === 'tlsservername' ||
+      keyLower === 'servername'
+    ) {
+      result.serverName = rawVal;
     }
   }
 

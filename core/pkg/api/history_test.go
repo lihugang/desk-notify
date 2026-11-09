@@ -207,6 +207,15 @@ func TestHistoryWithLanAuthRequired(t *testing.T) {
 		t.Fatalf("expected 401 Unauthorized for unauthenticated public history request, got %d", wPublic.Code)
 	}
 
+	// 4b. Real FRP request via public domain without X-Forwarded-For should return 401
+	reqRealFRP := httptest.NewRequest("GET", "http://kr-nc-bgp-1.ofalias.net:39980/api/history?limit=10&offset=0", nil)
+	reqRealFRP.RemoteAddr = "127.0.0.1:54321"
+	wRealFRP := httptest.NewRecorder()
+	srv.handleHistory(wRealFRP, reqRealFRP)
+	if wRealFRP.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for unauthenticated FRP history request, got %d", wRealFRP.Code)
+	}
+
 	// 5. Public request with valid token should return 200 OK
 	token, _ := auth.GenerateToken("123456")
 	reqPublicAuth := httptest.NewRequest("GET", "/api/history?limit=10&offset=0", nil)

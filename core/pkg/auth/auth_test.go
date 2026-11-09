@@ -79,6 +79,78 @@ func TestIsLoopbackRequest(t *testing.T) {
 	if IsLoopbackRequest(req4) {
 		t.Fatalf("expected req4 (192.168.1.50) not to be loopback")
 	}
+
+	// 5. FRP request via public domain (Host header without XFF, RemoteAddr=127.0.0.1)
+	reqFRP := httptest.NewRequest("GET", "http://kr-nc-bgp-1.ofalias.net:39980/api/status", nil)
+	reqFRP.RemoteAddr = "127.0.0.1:54321"
+	if IsLoopbackRequest(reqFRP) {
+		t.Fatalf("expected reqFRP (kr-nc-bgp-1.ofalias.net) not to be recognized as loopback")
+	}
+	if !IsPublicRequest(reqFRP) {
+		t.Fatalf("expected reqFRP to be recognized as public request")
+	}
+
+	// 6. Request marked with tunnel context (even if Host header is spoofed to localhost)
+	reqSpoofed := httptest.NewRequest("GET", "http://localhost:8920/api/status", nil)
+	reqSpoofed.RemoteAddr = "127.0.0.1:54321"
+	reqSpoofed = reqSpoofed.WithContext(WithTunnelContext(reqSpoofed.Context()))
+	if IsLoopbackRequest(reqSpoofed) {
+		t.Fatalf("expected reqSpoofed with tunnel context not to be recognized as loopback")
+	}
+	if !IsPublicRequest(reqSpoofed) {
+		t.Fatalf("expected reqSpoofed with tunnel context to be recognized as public request")
+	}
+}
+
+func TestCheckAuthFRPAndPublic(t *testing.T) {
+	hash, _ := HashPassword("123456")
+	cfg := config.AppConfig{
+		PasswordHash:    hash,
+		LanAuthRequired: false, // LAN free, but public must require password!
+		FRP: config.FRPConfig{
+			Enabled:    true,
+			ServerAddr: "kr-nc-bgp-1.ofalias.net",
+			RemotePort: 39980,
+		},
+	}
+
+	// 1. Unauthenticated FRP request via public domain should FAIL CheckAuth
+	reqFRP := httptest.NewRequest("GET", "http://kr-nc-bgp-1.ofalias.net:39980/api/status", nil)
+	reqFRP.RemoteAddr = "127.0.0.1:54321"
+	if CheckAuth(reqFRP, cfg) {
+		t.Fatalf("expected unauthenticated FRP request to fail CheckAuth")
+	}
+
+	// 2. Authenticated FRP request with valid token should PASS CheckAuth
+	token, _ := GenerateToken("123456")
+	reqFRPAuth := httptest.NewRequest("GET", "http://kr-nc-bgp-1.ofalias.net:39980/api/status", nil)
+	reqFRPAuth.RemoteAddr = "127.0.0.1:54321"
+	reqFRPAuth.Header.Set("Authorization", "Bearer "+token)
+	if !CheckAuth(reqFRPAuth, cfg) {
+		t.Fatalf("expected authenticated FRP request with token to pass CheckAuth")
+	}
+
+	// 3. Spoofed Host via tunnel context should FAIL CheckAuth when unauthenticated
+	reqSpoofed := httptest.NewRequest("GET", "http://localhost:8920/api/config", nil)
+	reqSpoofed.RemoteAddr = "127.0.0.1:54321"
+	reqSpoofed = reqSpoofed.WithContext(WithTunnelContext(reqSpoofed.Context()))
+	if CheckAuth(reqSpoofed, cfg) {
+		t.Fatalf("expected spoofed Host via tunnel context to fail CheckAuth")
+	}
+
+	// 4. Real local loopback request (localhost) should PASS CheckAuth
+	reqLocal := httptest.NewRequest("GET", "http://localhost:8920/api/config", nil)
+	reqLocal.RemoteAddr = "127.0.0.1:54321"
+	if !CheckAuth(reqLocal, cfg) {
+		t.Fatalf("expected real loopback request to pass CheckAuth")
+	}
+
+	// 5. LAN request when LanAuthRequired=false should PASS CheckAuth
+	reqLAN := httptest.NewRequest("GET", "http://192.168.1.100:8920/api/status", nil)
+	reqLAN.RemoteAddr = "192.168.1.50:54321"
+	if !CheckAuth(reqLAN, cfg) {
+		t.Fatalf("expected LAN request to pass CheckAuth when LanAuthRequired=false")
+	}
 }
 
 func TestCheckAuthLoopbackAndLan(t *testing.T) {

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -10,6 +11,26 @@ import (
 	"github.com/lihugang/desk-notify/core/pkg/config"
 	"golang.org/x/crypto/bcrypt"
 )
+
+type contextKey string
+
+const (
+	tunnelContextKey contextKey = "desk_notify_from_tunnel"
+)
+
+// WithTunnelContext marks the request context as originating from the reverse proxy / tunnel.
+func WithTunnelContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, tunnelContextKey, true)
+}
+
+// IsTunnelRequest checks if the request was received via the internal tunnel listener.
+func IsTunnelRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	val, ok := r.Context().Value(tunnelContextKey).(bool)
+	return ok && val
+}
 
 var (
 	privateIPBlocks []*net.IPNet
@@ -46,26 +67,84 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
+// isLoopbackHost checks whether host (or host:port) resolves to loopback (localhost, 127.0.0.1, ::1).
+func isLoopbackHost(host string) bool {
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host
+	}
+	h = strings.Trim(strings.TrimSpace(h), "[]")
+	if strings.EqualFold(h, "localhost") || strings.EqualFold(h, "example.com") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// isPrivateHost checks whether host (or host:port) is loopback, LAN private IP, or .local mDNS.
+func isPrivateHost(host string) bool {
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host
+	}
+	h = strings.Trim(strings.TrimSpace(h), "[]")
+	if isLoopbackHost(h) {
+		return true
+	}
+	if strings.HasSuffix(strings.ToLower(h), ".local") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	if ip != nil && isPrivateIP(ip) {
+		return true
+	}
+	return false
+}
+
 // IsPublicRequest checks whether the incoming request arrived via frp / public network.
 func IsPublicRequest(r *http.Request) bool {
-	// 1. If X-Forwarded-For is present with a public client IP, it came through a reverse proxy (frp)
+	if r == nil {
+		return false
+	}
+
+	// 1. If marked as incoming from internal tunnel listener, it is public
+	if IsTunnelRequest(r) {
+		return true
+	}
+
+	// 2. If X-Forwarded-For is present with a public client IP, it came through a reverse proxy (frp)
 	xff := r.Header.Get("X-Forwarded-For")
 	if xff != "" {
 		parts := strings.Split(xff, ",")
-		clientIP := strings.TrimSpace(parts[0])
-		ip := net.ParseIP(clientIP)
-		if ip != nil && !isPrivateIP(ip) {
-			return true
+		for _, part := range parts {
+			clientIP := strings.TrimSpace(part)
+			ip := net.ParseIP(clientIP)
+			if ip != nil && !isPrivateIP(ip) {
+				return true
+			}
 		}
 	}
 
-	// 2. Check RemoteAddr
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
+	// 3. Check X-Forwarded-Host: if present and points to a public host
+	xfh := r.Header.Get("X-Forwarded-Host")
+	if xfh != "" && !isPrivateHost(xfh) {
+		return true
 	}
-	remoteIP := net.ParseIP(host)
+
+	// 4. Check RemoteAddr: if RemoteAddr is not a private IP, it came directly from public internet
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteHost)
 	if remoteIP != nil && !isPrivateIP(remoteIP) {
+		return true
+	}
+
+	// 5. Check r.Host: when traffic is forwarded by FRP (TCP proxy) to loopback,
+	// RemoteAddr is 127.0.0.1, but r.Host carries the public domain or public IP (e.g. "kr-nc-bgp-1.ofalias.net:39980").
+	// If r.Host is not a private or loopback host, it is arriving via a public domain/IP.
+	if r.Host != "" && !isPrivateHost(r.Host) {
 		return true
 	}
 
@@ -78,18 +157,31 @@ func IsLoopbackRequest(r *http.Request) bool {
 	if r == nil {
 		return false
 	}
-	if IsPublicRequest(r) {
+	if IsTunnelRequest(r) || IsPublicRequest(r) {
+		return false
+	}
+
+	// Host header MUST be a loopback host (localhost, 127.0.0.1, ::1).
+	// If the request was addressed to a public domain/IP or LAN IP, it is not a loopback request.
+	if r.Host != "" && !isLoopbackHost(r.Host) {
 		return false
 	}
 
 	xff := r.Header.Get("X-Forwarded-For")
 	if xff != "" {
 		parts := strings.Split(xff, ",")
-		clientIP := strings.TrimSpace(parts[0])
-		ip := net.ParseIP(clientIP)
-		if ip == nil || !ip.IsLoopback() {
-			return false
+		for _, part := range parts {
+			clientIP := strings.TrimSpace(part)
+			ip := net.ParseIP(clientIP)
+			if ip == nil || !ip.IsLoopback() {
+				return false
+			}
 		}
+	}
+
+	xfh := r.Header.Get("X-Forwarded-Host")
+	if xfh != "" && !isLoopbackHost(xfh) {
+		return false
 	}
 
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -208,6 +300,15 @@ func CheckAuth(r *http.Request, cfg config.AppConfig) bool {
 	}
 
 	isPublic := IsPublicRequest(r)
+	if !isPublic && cfg.FRP.Enabled && cfg.FRP.ServerAddr != "" && r != nil && r.Host != "" {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if strings.EqualFold(host, cfg.FRP.ServerAddr) {
+			isPublic = true
+		}
+	}
 
 	// If LAN and no password required, allow
 	if !isPublic && !cfg.LanAuthRequired {

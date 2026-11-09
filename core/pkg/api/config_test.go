@@ -508,6 +508,7 @@ func TestSecurityConfigHotReload(t *testing.T) {
 			"proxyName":                 "test-proxy",
 			"tlsEnable":                 true,
 			"disableCustomTLSFirstByte": false,
+			"serverName":                "sni.example.com",
 		},
 		"lanAuthRequired": true,
 	})
@@ -537,6 +538,9 @@ func TestSecurityConfigHotReload(t *testing.T) {
 	}
 	if savedCfg.FRP.DisableCustomTLSFirstByte == nil || *savedCfg.FRP.DisableCustomTLSFirstByte {
 		t.Fatalf("expected DisableCustomTLSFirstByte == false")
+	}
+	if savedCfg.FRP.ServerName != "sni.example.com" {
+		t.Fatalf("expected ServerName == 'sni.example.com', got %s", savedCfg.FRP.ServerName)
 	}
 
 	// 3. Verify tunnel was hot-reloaded with the new configuration

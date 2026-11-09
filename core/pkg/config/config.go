@@ -74,6 +74,7 @@ type FRPConfig struct {
 	Protocol                  string `json:"protocol,omitempty"`
 	TLSEnable                 *bool  `json:"tlsEnable,omitempty"`
 	DisableCustomTLSFirstByte *bool  `json:"disableCustomTLSFirstByte,omitempty"`
+	ServerName                string `json:"serverName,omitempty"`
 }
 
 type AppConfig struct {
